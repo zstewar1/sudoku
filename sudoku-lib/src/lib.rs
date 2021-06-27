@@ -16,6 +16,13 @@ impl Coord {
     }
 }
 
+impl From<(usize, usize)> for Coord {
+    /// Converts an (y-row, x-col) pair to a Coordinate.
+    fn from((row, col): (usize, usize)) -> Self {
+        Coord { row, col }
+    }
+}
+
 /// Set of available numbers.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct AvailSet(u16);
@@ -102,7 +109,7 @@ impl Board {
     }
 
     /// Manually specify the value of a particular position. Used for setup.
-    pub fn specify(&mut self, coord: Coord, val: u8) {
+    pub fn specify(&mut self, coord: impl Into<Coord>, val: u8) {
         *self.cell_mut(coord) = AvailSet::only(val);
     }
 
@@ -140,7 +147,6 @@ impl Board {
         None
     }
 
-
     /// Iterate over all cell indexes.
     pub fn all_cells() -> impl Iterator<Item = Coord> {
         (0..9).flat_map(|row| (0..9).map(move |col| Coord::new(row, col)))
@@ -169,26 +175,31 @@ impl Board {
             .flat_map(move |row| (base_col..).take(3).map(move |col| Coord::new(row, col)))
     }
 
+    /// Iterate over all cell indexes where the value is known (exactly 1 value left).
+    fn known_cells<'a>(&'a self) -> impl 'a + Iterator<Item = Coord> {
+        Self::all_cells().filter(move |&cell| self.get(cell).is_some())
+    }
+
     /// Reduce this board by eliminating numbers that are definitely excluded.
     /// Returns false if reduction eliminated all possible numbers from any cell, which means that
     /// this board is unsolveable.
     fn deductive_reduce(&mut self) -> bool {
-        let mut queue: VecDeque<_> = Self::all_cells().collect();
+        let mut queue: VecDeque<_> = self.known_cells().collect();
         while let Some(pos) = queue.pop_front() {
-            if let Some(val) = self.get(pos) {
-                for neighbor in Self::neighbors(pos) {
-                    let n = self.cell_mut(neighbor);
-                    if n.remove(val) {
-                        // If the last entry was removed from the cell, there is no solution from
-                        // here, so stop and return false.
-                        if n.is_empty() {
-                            return false;
-                        }
-                        // If the neighbor was modified, see re-enqueue it to eliminate more stuff
-                        // if possible.
-                        if !queue.contains(&neighbor) {
-                            queue.push_back(neighbor);
-                        }
+            let val = self.get(pos).expect("Should only enqueue singular cells");
+            for neighbor in Self::neighbors(pos) {
+                let n = self.cell_mut(neighbor);
+                // Don't revisit cells that didn't change.
+                if n.remove(val) {
+                    // If the last entry was removed from the cell, there is no solution from
+                    // here, so stop and return false.
+                    if n.is_empty() {
+                        return false;
+                    }
+                    // If the neighbor has been reduced to having a single value left, then we
+                    // may be able to eliminate more values by visiting it again
+                    if n.is_single() && !queue.contains(&neighbor) {
+                        queue.push_back(neighbor);
                     }
                 }
             }
@@ -201,7 +212,7 @@ impl Board {
     fn inductive_reduce<'a>(&'a self) -> impl 'a + Iterator<Item = Board> {
         let cell = Self::all_cells()
             .find(|&cell| !self.cell(cell).is_single())
-            .expect("Board is already solved");
+            .expect("Board is already solved or has cells with no remaining values");
         let choices = self.cell(cell).iter();
         choices.filter_map(move |val| {
             let mut board = self.clone();
@@ -240,13 +251,15 @@ impl Board {
             .filter(move |&other| other != pos)
     }
 
-    fn cell(&self, pos: Coord) -> &AvailSet {
+    fn cell(&self, pos: impl Into<Coord>) -> &AvailSet {
+        let pos = pos.into();
         assert!(pos.col < Self::WIDTH);
         assert!(pos.row < Self::HEIGHT);
         &self.0[pos.row * Self::WIDTH + pos.col]
     }
 
-    fn cell_mut(&mut self, pos: Coord) -> &mut AvailSet {
+    fn cell_mut(&mut self, pos: impl Into<Coord>) -> &mut AvailSet {
+        let pos = pos.into();
         assert!(pos.col < Self::WIDTH);
         assert!(pos.row < Self::HEIGHT);
         &mut self.0[pos.row * Self::WIDTH + pos.col]
@@ -256,5 +269,61 @@ impl Board {
 impl Default for Board {
     fn default() -> Self {
         Board(vec![AvailSet::all(); 81])
+    }
+}
+
+impl<T: AsRef<[u8]>> From<T> for Board {
+    /// Convenience method for building a board for in a test. Use a single-dimensional vector of
+    /// 81 cells. Unlike [`AvailSet::only`] and [`Board::specify`], 0 is accepted as a value, in
+    /// order to mark a cell as not having a specified value. This is instead of using `Option<u8>`
+    /// because it is more convenient for tests.
+    fn from(values: T) -> Self {
+        let values = values.as_ref();
+        assert!(values.len() == 81);
+        let mut board = Board::new();
+        for (cell, val) in Board::all_cells().zip(values.iter().copied()) {
+            if val != 0 {
+                board.specify(cell, val);
+            }
+        }
+        board
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_solve() {
+        let board = Board::from([
+            0,0,0, 1,0,0, 0,0,0,
+            0,0,0, 0,5,8, 6,0,1,
+            8,0,1, 3,6,0, 0,9,0,
+
+            5,0,0, 0,0,0, 4,0,3,
+            0,0,3, 6,0,1, 8,0,0,
+            6,0,4, 0,0,0, 0,0,7,
+
+            0,3,0, 0,8,4, 5,0,6,
+            1,0,5, 7,2,0, 0,0,0,
+            0,0,0, 0,0,3, 0,0,0,
+        ]);
+        let expected = Board::from([
+            4,6,7, 1,9,2, 3,8,5,
+            3,2,9, 4,5,8, 6,7,1,
+            8,5,1, 3,6,7, 2,9,4,
+
+            5,1,8, 2,7,9, 4,6,3,
+            2,7,3, 6,4,1, 8,5,9,
+            6,9,4, 8,3,5, 1,2,7,
+
+            7,3,2, 9,8,4, 5,1,6,
+            1,4,5, 7,2,6, 9,3,8,
+            9,8,6, 5,1,3, 7,4,2,
+        ]);
+        let res = board.solve();
+        assert_eq!(res, Some(expected));
     }
 }
