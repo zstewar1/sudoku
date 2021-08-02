@@ -1,27 +1,9 @@
 use std::collections::VecDeque;
 
-/// Coordinates on the Sudoku board.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub struct Coord {
-    /// Row (y).
-    pub row: usize,
-    /// Column (x).
-    pub col: usize,
-}
+pub use coordinates::{Col, Coord, Row, Sector, Zone};
 
-impl Coord {
-    /// Construct a new coordinate. Since this is (row, col), note that it is (y, x).
-    pub fn new(row: usize, col: usize) -> Self {
-        Coord { row, col }
-    }
-}
-
-impl From<(usize, usize)> for Coord {
-    /// Converts an (y-row, x-col) pair to a Coordinate.
-    fn from((row, col): (usize, usize)) -> Self {
-        Coord { row, col }
-    }
-}
+#[macro_use]
+mod coordinates;
 
 /// Set of available numbers.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -97,11 +79,11 @@ impl AvailSet {
 
 /// Sudoku Board.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Board(Vec<AvailSet>);
+pub struct Board(Box<[AvailSet]>);
 
 impl Board {
-    pub const WIDTH: usize = 9;
-    pub const HEIGHT: usize = 9;
+    /// Total size of the board.
+    pub const SIZE: usize = (Row::SIZE * Col::SIZE) as usize;
 
     /// Create a new board with no positions specified.
     pub fn new() -> Self {
@@ -114,7 +96,7 @@ impl Board {
     }
 
     /// Get the value at a specific coordinate, if known.
-    pub fn get(&self, pos: Coord) -> Option<u8> {
+    pub fn get(&self, pos: impl Into<Coord>) -> Option<u8> {
         self.cell(pos).get_single()
     }
 
@@ -147,37 +129,13 @@ impl Board {
         None
     }
 
-    /// Iterate over all cell indexes.
-    pub fn all_cells() -> impl Iterator<Item = Coord> {
-        (0..9).flat_map(|row| (0..9).map(move |col| Coord::new(row, col)))
-    }
-
-    /// Iterate over all cell indexes in the given row.
-    pub fn row(row: usize) -> impl Iterator<Item = Coord> {
-        assert!(row < Self::HEIGHT);
-        (0..9).map(move |col| Coord::new(row, col))
-    }
-
-    /// Iterate over all cell indexes in the given row.
-    pub fn col(col: usize) -> impl Iterator<Item = Coord> {
-        assert!(col < Self::WIDTH);
-        (0..9).map(move |row| Coord::new(row, col))
-    }
-
-    /// Iterate over all cell indexes in the same sector as the given coordinates.
-    pub fn sector(pos: Coord) -> impl Iterator<Item = Coord> {
-        assert!(pos.row < Self::HEIGHT);
-        assert!(pos.col < Self::WIDTH);
-        let base_row = pos.row - (pos.row % 3);
-        let base_col = pos.col - (pos.col % 3);
-        (base_row..)
-            .take(3)
-            .flat_map(move |row| (base_col..).take(3).map(move |col| Coord::new(row, col)))
-    }
-
     /// Iterate over all cell indexes where the value is known (exactly 1 value left).
     fn known_cells<'a>(&'a self) -> impl 'a + Iterator<Item = Coord> {
-        Self::all_cells().filter(move |&cell| self.get(cell).is_some())
+        (0..Self::SIZE).filter_map(move |idx| if self.0[idx].is_single() {
+            Some(Coord::from_flat_index(idx))
+        } else {
+            None
+        })
     }
 
     /// Reduce this board by eliminating numbers that are definitely excluded.
@@ -187,7 +145,7 @@ impl Board {
         let mut queue: VecDeque<_> = self.known_cells().collect();
         while let Some(pos) = queue.pop_front() {
             let val = self.get(pos).expect("Should only enqueue singular cells");
-            for neighbor in Self::neighbors(pos) {
+            for neighbor in pos.neighbors() {
                 let n = self.cell_mut(neighbor);
                 // Don't revisit cells that didn't change.
                 if n.remove(val) {
@@ -210,8 +168,12 @@ impl Board {
     /// Inductively reduce the board by finding the fist cell that isn't fully specified and
     /// returning copies of the board with every possible solution for that cell.
     fn inductive_reduce<'a>(&'a self) -> impl 'a + Iterator<Item = Board> {
-        let cell = Self::all_cells()
-            .find(|&cell| !self.cell(cell).is_single())
+        let cell = (0..Self::SIZE)
+            .find_map(|idx| if !self.0[idx].is_single() {
+                Some(Coord::from_flat_index(idx))
+            } else {
+                None
+            })
             .expect("Board is already solved or has cells with no remaining values");
         let choices = self.cell(cell).iter();
         choices.filter_map(move |val| {
@@ -225,50 +187,25 @@ impl Board {
         })
     }
 
-    /// Returns true if the board is solved. Note: this only checks if all numbers have been
-    /// singularized, it does not check whether any numbers conflict. To prevent conflicts, you
-    /// first need to run deductive_reduce.
+    /// Returns true if the board is solved. Note: this only checks if all
+    /// numbers have been singularized, it does not check whether any numbers
+    /// conflict. To prevent conflicts, you first need to run deductive_reduce.
     fn is_solved(&self) -> bool {
-        for cell in Self::all_cells() {
-            if !self.cell(cell).is_single() {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Gets the indexes of all neighbors of the given coordinate (tiles in the same row, column,
-    /// or sector.
-    fn neighbors(pos: Coord) -> impl Iterator<Item = Coord> {
-        Self::row(pos.row)
-            .chain(Self::col(pos.col))
-            .chain(
-                Self::sector(pos)
-                    // others with the same row or col are already covered by the previous two
-                    // iterators, don't visit them twice.
-                    .filter(move |other| other.row != pos.row && other.col != pos.col),
-            )
-            .filter(move |&other| other != pos)
+        (0..Self::SIZE).all(|idx| self.0[idx].is_single())
     }
 
     fn cell(&self, pos: impl Into<Coord>) -> &AvailSet {
-        let pos = pos.into();
-        assert!(pos.col < Self::WIDTH);
-        assert!(pos.row < Self::HEIGHT);
-        &self.0[pos.row * Self::WIDTH + pos.col]
+        &self.0[pos.into().flat_index()]
     }
 
     fn cell_mut(&mut self, pos: impl Into<Coord>) -> &mut AvailSet {
-        let pos = pos.into();
-        assert!(pos.col < Self::WIDTH);
-        assert!(pos.row < Self::HEIGHT);
-        &mut self.0[pos.row * Self::WIDTH + pos.col]
+        &mut self.0[pos.into().flat_index()]
     }
 }
 
 impl Default for Board {
     fn default() -> Self {
-        Board(vec![AvailSet::all(); 81])
+        Board(vec![AvailSet::all(); Self::SIZE].into_boxed_slice())
     }
 }
 
@@ -279,11 +216,11 @@ impl<T: AsRef<[u8]>> From<T> for Board {
     /// because it is more convenient for tests.
     fn from(values: T) -> Self {
         let values = values.as_ref();
-        assert!(values.len() == 81);
+        assert!(values.len() == Self::SIZE);
         let mut board = Board::new();
-        for (cell, val) in Board::all_cells().zip(values.iter().copied()) {
+        for (idx, val) in values.iter().copied().enumerate() {
             if val != 0 {
-                board.specify(cell, val);
+                board.0[idx] = AvailSet::only(val);
             }
         }
         board

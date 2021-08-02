@@ -6,7 +6,7 @@ use rocket_contrib::json::Json;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use sudoku_lib::{Board, Coord};
+use sudoku_lib::{Board, Coord, Row, Zone};
 
 /// Result of attempting to solve the sudoku puzzle.
 #[derive(Error, Debug, Responder)]
@@ -53,13 +53,13 @@ fn solve(board: Json<Vec<Vec<Option<u8>>>>) -> Result<Json<Vec<Vec<u8>>>, SolveF
         }
     }
     if let Some(solution) = board.solve() {
-        let mut res = Vec::with_capacity(Board::HEIGHT);
-        for r in 0..Board::HEIGHT {
-            let mut row = Vec::with_capacity(Board::WIDTH);
-            for c in 0..Board::WIDTH {
+        let mut res = Vec::with_capacity(Board::SIZE);
+        for r in Row::all() {
+            let mut row = Vec::with_capacity(Row::SIZE as usize);
+            for coord in r.indexes() {
                 row.push(
                     solution
-                        .get(Coord::new(r, c))
+                        .get(coord)
                         .expect("Solution was expected to have all cells with single known values"),
                 );
             }
