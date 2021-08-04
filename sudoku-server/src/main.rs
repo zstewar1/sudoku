@@ -56,7 +56,7 @@ fn solve(board: Json<Vec<Vec<Option<u8>>>>) -> Result<Json<Vec<Vec<u8>>>, SolveF
         let mut res = Vec::with_capacity(Board::SIZE);
         for r in Row::all() {
             let mut row = Vec::with_capacity(Row::SIZE as usize);
-            for coord in r.indexes() {
+            for coord in r.coords() {
                 row.push(
                     solution
                         .get(coord)

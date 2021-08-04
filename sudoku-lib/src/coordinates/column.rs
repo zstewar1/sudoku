@@ -1,6 +1,7 @@
 use std::ops::Range;
 
-use crate::{Coord, Zone, Row};
+use crate::{Coord, Row, Zone};
+use crate::collections::indexed::FixedSizeIndex;
 
 /// Uniquely identifies a single column on the sudoku board. That is all cells
 /// with the same x coordinate.
@@ -14,12 +15,6 @@ impl Col {
         col.into()
     }
 
-    /// Get the column as an index. This is the column number as usize.
-    #[inline]
-    pub fn index(&self) -> usize {
-        self.0 as usize
-    }
-
     /// Unwrap the inner u8 value
     pub(crate) fn inner(self) -> u8 {
         self.0
@@ -27,55 +22,72 @@ impl Col {
 }
 
 rowcol_fromint!(
-    Col, Col::SIZE, "col", 
-    u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize, isize
+    Col,
+    Col::SIZE,
+    "col",
+    u8,
+    i8,
+    u16,
+    i16,
+    u32,
+    i32,
+    u64,
+    i64,
+    u128,
+    i128,
+    usize,
+    isize
 );
 
 impl Zone for Col {
-    type All = Cols;
+    type Coords = Coords;
 
     #[inline]
-    fn all() -> Self::All {
-        Cols(0..Row::SIZE as u8)
-    }
-
-    type Indexes = Indexes;
-
-    #[inline]
-    fn indexes(&self) -> Self::Indexes {
-        Indexes {
+    fn coords(&self) -> Self::Coords {
+        Coords {
             range: 0..Col::SIZE as u8,
-            col: *self, 
+            col: *self,
         }
     }
+
+    #[inline]
+    fn containing(coord: impl Into<Coord>) -> Self {
+        coord.into().col()
+    }
+
+    #[inline]
+    fn contains(&self, coord: impl Into<Coord>) -> bool {
+        *self == Self::containing(coord)
+    }
 }
 
+impl FixedSizeIndex for Col {
+    // Number of columns is the size of a row.
+    const NUM_INDEXES: usize = Row::SIZE;
+
+    fn idx(&self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_idx(idx: usize) -> Self {
+        idx.into()
+    }
+}
 
 /// Iterator over a row.
-pub struct Indexes {
+pub struct Coords {
     range: Range<u8>,
-    col: Col, 
+    col: Col,
 }
 
-impl Indexes {
+impl Coords {
     #[inline]
     fn build_coord(&self, row: u8) -> Coord {
         Coord::new(row, self.col)
     }
 }
 
-zone_indexes_iter!(Indexes);
-
-/// Iterator over all columns.
-pub struct Cols(Range<u8>);
-
-impl Cols {
-    fn build_zone(c: u8) -> Col {
-        Col(c)
-    }
-}
-
-zone_all_iter!(Cols, Col);
+zone_coords_iter!(Coords);
 
 #[cfg(test)]
 mod tests {
@@ -86,7 +98,7 @@ mod tests {
         for c in 0..9 {
             let col = Col::new(c);
             let expected: Vec<_> = (0..9).map(|r| Coord::new(r, c)).collect();
-            let result: Vec<_> = col.indexes().collect();
+            let result: Vec<_> = col.coords().collect();
             assert_eq!(result, expected);
         }
     }

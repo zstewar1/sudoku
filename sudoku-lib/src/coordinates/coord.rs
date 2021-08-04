@@ -1,6 +1,6 @@
-use std::ops::Range;
-
-use crate::{Board, Col, Row, Sector, Zone};
+use std::iter::FusedIterator;
+use crate::{Col, Row, Sector, Zone};
+use crate::collections::indexed::FixedSizeIndex;
 
 /// Coordinates of a single cell on the Sudoku board.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -45,25 +45,6 @@ impl Coord {
         self.col = col.into();
     }
 
-    /// Convert the row/column index into a linear board index as a usize to
-    /// allow indexing the actual slice holding the cells.
-    /// 
-    /// This implements row-major indexing, where each row is in contiguous space (can be 
-    /// pulled out as a slice) while columns are spread across rows. A row slice could be
-    /// indexed by column.
-    #[inline]
-    pub(crate) fn flat_index(&self) -> usize {
-        self.row.index() * Row::SIZE as usize + self.col.index()
-    }
-
-    /// Converts a flat index to a coordinate.
-    pub(crate) fn from_flat_index(idx: usize) -> Self {
-        assert!(idx < Board::SIZE, "flat index must be in range [0, {}), got {}", Board::SIZE, idx);
-        let row = (idx / Row::SIZE as usize).into();
-        let col = (idx % Row::SIZE as usize).into();
-        Coord { row, col }
-    }
-
     /// Get the sector that this coordinate is in.
     #[inline]
     pub fn sector(&self) -> Sector {
@@ -72,13 +53,15 @@ impl Coord {
 
     /// Get all coordinates in the same row, column, and sector as this
     /// coordinate.
-    pub fn neighbors(&self) -> impl Iterator<Item = Coord> {
+    pub fn neighbors(&self) -> impl Iterator<Item = Coord> + DoubleEndedIterator + FusedIterator {
         let copy = *self;
-        self.row.indexes()
-            .chain(self.col.indexes())
+        self.row
+            .coords()
+            .chain(self.col.coords())
             .chain(
-                self.sector().indexes()
-                    .filter(move |other| other.row != copy.row && other.col != copy.col)
+                self.sector().coords().filter(move |&other| {
+                    !copy.row().contains(other) && !copy.col().contains(other)
+                }),
             )
             .filter(move |other| other != &copy)
     }
@@ -95,30 +78,43 @@ impl Zone for Coord {
     /// Coords are a single cell.
     const SIZE: usize = 1;
 
-    type All = Coords;
-
-    fn all() -> Self::All {
-        Coords(0..Board::SIZE)
-    }
-
-    type Indexes = std::iter::Once<Coord>;
+    type Coords = std::iter::Once<Coord>;
 
     #[inline]
-    fn indexes(&self) -> Self::Indexes {
+    fn coords(&self) -> Self::Coords {
         std::iter::once(*self)
     }
-}
 
-/// Iterator over all coordinates.
-pub struct Coords(Range<usize>);
+    #[inline]
+    fn containing(coord: impl Into<Coord>) -> Self {
+        coord.into()
+    }
 
-impl Coords {
-    fn build_zone(idx: usize) -> Coord {
-        Coord::from_flat_index(idx)
+    #[inline]
+    fn contains(&self, coord: impl Into<Coord>) -> bool {
+        *self == coord.into()
     }
 }
 
-zone_all_iter!(Coords, Coord);
+impl FixedSizeIndex for Coord {
+    const NUM_INDEXES: usize = Row::SIZE * Col::SIZE;
+
+    fn idx(&self) -> usize {
+        self.row.idx() * Col::NUM_INDEXES + self.col.idx()
+    }
+
+    fn from_idx(idx: usize) -> Self {
+        assert!(
+            idx < Self::NUM_INDEXES,
+            "flat index must be in range [0, {}), got {}",
+            Self::NUM_INDEXES,
+            idx
+        );
+        let row = (idx / Col::NUM_INDEXES).into();
+        let col = (idx % Col::NUM_INDEXES).into();
+        Coord { row, col }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -129,7 +125,7 @@ mod tests {
         for r in 0..9 {
             for c in 0..9 {
                 let coord = Coord::new(r, c);
-                let result: Vec<_> = coord.indexes().collect();
+                let result: Vec<_> = coord.coords().collect();
                 assert_eq!(result, vec![coord]);
             }
         }
