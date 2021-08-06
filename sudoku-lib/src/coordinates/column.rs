@@ -1,11 +1,10 @@
-use std::ops::Range;
-
-use crate::{Coord, Row, Zone};
 use crate::collections::indexed::FixedSizeIndex;
+use crate::coordinates::{ZoneContaining, FixedSizeIndexable};
+use crate::{Coord, Row, Zone};
 
 /// Uniquely identifies a single column on the sudoku board. That is all cells
 /// with the same x coordinate.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Col(u8);
 
 impl Col {
@@ -16,6 +15,7 @@ impl Col {
     }
 
     /// Unwrap the inner u8 value
+    #[inline]
     pub(crate) fn inner(self) -> u8 {
         self.0
     }
@@ -39,25 +39,21 @@ rowcol_fromint!(
     isize
 );
 
-impl Zone for Col {
-    type Coords = Coords;
+impl FixedSizeIndexable for Col {
+    type Item = Coord;
+
+    const NUM_ITEMS: usize = 9;
 
     #[inline]
-    fn coords(&self) -> Self::Coords {
-        Coords {
-            range: 0..Col::SIZE as u8,
-            col: *self,
-        }
+    fn get_at_index(&self, idx: usize) -> Self::Item {
+        Coord::new(idx, *self)
     }
+}
 
+impl ZoneContaining for Col {
     #[inline]
-    fn containing(coord: impl Into<Coord>) -> Self {
+    fn containing_zone(coord: impl Into<Coord>) -> Self {
         coord.into().col()
-    }
-
-    #[inline]
-    fn contains(&self, coord: impl Into<Coord>) -> bool {
-        *self == Self::containing(coord)
     }
 }
 
@@ -73,21 +69,6 @@ impl FixedSizeIndex for Col {
         idx.into()
     }
 }
-
-/// Iterator over a row.
-pub struct Coords {
-    range: Range<u8>,
-    col: Col,
-}
-
-impl Coords {
-    #[inline]
-    fn build_coord(&self, row: u8) -> Coord {
-        Coord::new(row, self.col)
-    }
-}
-
-zone_coords_iter!(Coords);
 
 #[cfg(test)]
 mod tests {

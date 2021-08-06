@@ -1,9 +1,11 @@
 use std::iter::FusedIterator;
-use crate::{Col, Row, Sector, Zone};
+
 use crate::collections::indexed::FixedSizeIndex;
+use crate::{Col, Row, Sector, Zone};
+use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
 
 /// Coordinates of a single cell on the Sudoku board.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Coord {
     /// Row (y).
     row: Row,
@@ -74,25 +76,22 @@ impl<T: Into<Row>, U: Into<Col>> From<(T, U)> for Coord {
     }
 }
 
-impl Zone for Coord {
+impl FixedSizeIndexable for Coord {
+    type Item = Coord;
+
     /// Coords are a single cell.
-    const SIZE: usize = 1;
+    const NUM_ITEMS: usize = 1;
 
-    type Coords = std::iter::Once<Coord>;
-
-    #[inline]
-    fn coords(&self) -> Self::Coords {
-        std::iter::once(*self)
+    fn get_at_index(&self, idx: usize) -> Self::Item {
+        assert!(idx < Self::NUM_ITEMS, "index {} out of range", idx);
+        *self
     }
+}
 
+impl ZoneContaining for Coord {
     #[inline]
-    fn containing(coord: impl Into<Coord>) -> Self {
+    fn containing_zone(coord: impl Into<Coord>) -> Self {
         coord.into()
-    }
-
-    #[inline]
-    fn contains(&self, coord: impl Into<Coord>) -> bool {
-        *self == coord.into()
     }
 }
 

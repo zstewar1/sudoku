@@ -1,11 +1,11 @@
-use std::iter::FusedIterator;
-use std::ops::Range;
 use std::borrow::Borrow;
-use std::marker::PhantomData;
-use std::ops::{Index, IndexMut};
 use std::hash::{Hash, Hasher};
+use std::iter::FusedIterator;
+use std::marker::PhantomData;
+use std::ops::Range;
+use std::ops::{Index, IndexMut};
 
-/// Map over over some type that can convert to a flat index. This map does not allow 
+/// Map over over some type that can convert to a flat index. This map does not allow
 /// values to be absent; any value not explicitly set will have a default value stored.
 /// This will therefore mean that the map always has the size of the number of indexes.
 /// Indexes must be contiguous.
@@ -56,17 +56,24 @@ where
 }
 
 impl<K, V> IndexMap<K, V>
-where K: FixedSizeIndex
+where
+    K: FixedSizeIndex,
 {
     /// Iterator over all cells with their corresponding keys.
     #[allow(unused)]
-    pub fn iter(&self) -> impl Iterator<Item = (K, &V)> + ExactSizeIterator + DoubleEndedIterator + FusedIterator {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (K, &V)> + ExactSizeIterator + DoubleEndedIterator + FusedIterator
+    {
         K::values().zip(self.values())
     }
 
     /// Iterator over all mut cells with their corresponding keys.
     #[allow(unused)]
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (K, &mut V)>  + ExactSizeIterator + DoubleEndedIterator  + FusedIterator {
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (K, &mut V)> + ExactSizeIterator + DoubleEndedIterator + FusedIterator
+    {
         K::values().zip(self.values_mut())
     }
 
@@ -138,7 +145,10 @@ pub trait FixedSizeIndex {
     /// Number of converted indexs.
     const NUM_INDEXES: usize;
 
-    fn values() -> Values<Self> where Self: Sized {
+    fn values() -> Values<Self>
+    where
+        Self: Sized,
+    {
         Values {
             range: 0..Self::NUM_INDEXES,
             _zone: PhantomData,
@@ -199,13 +209,13 @@ impl<I: FixedSizeIndex> FusedIterator for Values<I> {}
 //     // Col size because that's the number of rows.
 //     const NUM_INDEXES: usize =
 //         Col::SIZE / Sector::HEIGHT as usize * Sector::NUM_SECTORS as usize;
-// 
+//
 //     fn idx(&self) -> Option<usize> {
 //         self.1
 //             .to_relative(self.0)
 //             .map(|rel_row| (rel_row * Sector::NUM_SECTORS) as usize + self.1.flat_index())
 //     }
-// 
+//
 //     fn from_idx(idx: usize) -> Self {
 //         assert!(idx < Self::NUM_INDEXES);
 //         let rel_row = (idx / Sector::NUM_SECTORS as usize) as u8;
@@ -213,17 +223,17 @@ impl<I: FixedSizeIndex> FusedIterator for Values<I> {}
 //         (sector.from_relative(rel_row), sector)
 //     }
 // }
-// 
+//
 // impl FixedSizeIndex for (Col, Sector) {
 //     // Row size because that's the number of cols.
 //     const NUM_INDEXES: usize = Row::SIZE / Sector::WIDTH as usize * Sector::NUM_SECTORS as usize;
-// 
+//
 //     fn idx(&self) -> Option<usize> {
 //         self.1
 //             .to_relative(self.0)
 //             .map(|rel_col| (rel_col * Sector::NUM_SECTORS) as usize + self.1.flat_index())
 //     }
-// 
+//
 //     fn from_idx(idx: usize) -> Self {
 //         assert!(idx < Self::NUM_INDEXES);
 //         let rel_col = (idx / Sector::NUM_SECTORS as usize) as u8;
@@ -231,4 +241,4 @@ impl<I: FixedSizeIndex> FusedIterator for Values<I> {}
 //         (sector.from_relative(rel_col), sector)
 //     }
 // }
-// 
+//

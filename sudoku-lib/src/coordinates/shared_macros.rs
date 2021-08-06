@@ -15,44 +15,14 @@ macro_rules! rowcol_fromint {
     };
 }
 
-macro_rules! zone_coords_iter {
-    ($it:ty) => {
-        impl Iterator for $it {
-            type Item = Coord;
+macro_rules! reciprocal_intersect {
+    (<$z1:ty> for $z2:ty) => {
+        impl Intersect<$z1> for $z2 {
+            type Intersection = <$z1 as Intersect<$z2>>::Intersection;
 
-            #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
-                self.range.next().map(|val| self.build_coord(val))
-            }
-
-            #[inline]
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                self.range.size_hint()
-            }
-
-            #[inline]
-            fn nth(&mut self, n: usize) -> Option<Self::Item> {
-                self.range.nth(n).map(|val| self.build_coord(val))
-            }
-
-            #[inline]
-            fn last(mut self) -> Option<Self::Item> {
-                self.next_back()
+            fn intersect(self, other: $z1) -> Option<Self::Intersection> {
+                other.intersect(self)
             }
         }
-
-        impl ExactSizeIterator for $it {}
-
-        impl DoubleEndedIterator for $it {
-            fn next_back(&mut self) -> Option<Self::Item> {
-                self.range.next_back().map(|val| self.build_coord(val))
-            }
-
-            fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-                self.range.nth_back(n).map(|val| self.build_coord(val))
-            }
-        }
-
-        impl std::iter::FusedIterator for $it {}
     };
 }

@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
-pub use coordinates::{Col, Coord, Row, Sector, Zone};
+pub use coordinates::{Col, Coord, Row, Sector, SectorRow, Intersect, Zone, SectorCol};
 
-use collections::availset::{AvailSet, AvailCounter};
-use collections::indexed::{IndexMap, FixedSizeIndex};
+use collections::availset::{AvailCounter, AvailSet};
+use collections::indexed::{FixedSizeIndex, IndexMap};
 
 mod collections;
 #[macro_use]
@@ -62,11 +62,15 @@ impl Board {
     }
 
     /// Iterate over all cell coords where the value is known (exactly 1 value left).
-    fn known_cells<'a>(&'a self) -> impl 'a + Iterator<Item = (Coord, &AvailSet)> + DoubleEndedIterator {
-        self.0.values().enumerate().filter_map(|(idx, v)| if v.is_single() {
-            Some((Coord::from_idx(idx), v))
-        } else {
-            None
+    fn known_cells<'a>(
+        &'a self,
+    ) -> impl 'a + Iterator<Item = (Coord, &AvailSet)> + DoubleEndedIterator {
+        self.0.values().enumerate().filter_map(|(idx, v)| {
+            if v.is_single() {
+                Some((Coord::from_idx(idx), v))
+            } else {
+                None
+            }
         })
     }
 
@@ -96,7 +100,7 @@ impl Board {
                         return false;
                     }
 
-                    // Whenever we successfully remove a value from a cell, also remove 
+                    // Whenever we successfully remove a value from a cell, also remove
                     // from the corresponding row/col + sector intersects.
                     // rowsec[(neighbor.row(), neighbor.sector())].remove(val);
                     // colsec[(neighbor.col(), neighbor.sector())].remove(val);
@@ -115,7 +119,10 @@ impl Board {
     /// Inductively reduce the board by finding the fist cell that isn't fully specified and
     /// returning copies of the board with every possible solution for that cell.
     fn inductive_reduce<'a>(&'a self) -> impl 'a + Iterator<Item = Board> {
-        let cell = self.0.values().enumerate()
+        let cell = self
+            .0
+            .values()
+            .enumerate()
             .find_map(|(idx, val)| {
                 if !val.is_single() {
                     Some(Coord::from_idx(idx))

@@ -1,16 +1,17 @@
 use std::iter::FusedIterator;
 use std::ops::Range;
 
-use crate::{Col, Coord, Row, Zone};
 use crate::collections::indexed::FixedSizeIndex;
+use crate::coordinates::{ZoneContaining, FixedSizeIndexable};
+use crate::{Col, Coord, Row, Zone, SectorRow, SectorCol};
 
 /// Identifies a single 3x3 sector on the sudoku board.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Sector {
     /// Row (y) index of the sector out of 3.
-    pub(crate) row: u8,
+    base_row: u8,
     /// Column (x) index of the sector out of 3.
-    pub(crate) col: u8,
+    base_col: u8,
 }
 
 impl Sector {
@@ -28,130 +29,65 @@ impl Sector {
     /// Total number of sectors.
     pub(crate) const NUM_SECTORS: u8 = Self::SECTORS_ACROSS * Self::SECTORS_DOWN;
 
-    /// Converts a row, column, or coordinate to one relative to this sector.
     #[inline]
-    pub(crate) fn to_relative<T: Relative>(&self, coord: T) -> Option<<T as Relative>::Rel> {
-        coord.to_rel(self)
-    }
-
-    /// Converts a row, column, or coordinate relative to this sector back to an absolute one.
-    #[inline]
-    pub(crate) fn from_relative<T: Relative>(&self, coord: <T as Relative>::Rel) -> T {
-        T::from_rel(coord, self)
+    pub(crate) fn base_row(&self) -> u8 {
+        self.base_row
     }
 
     #[inline]
-    fn base_row(&self) -> u8 {
-        self.row * Self::HEIGHT
+    pub(crate) fn base_col(&self) -> u8 {
+        self.base_col
     }
 
     #[inline]
-    fn base_col(&self) -> u8 {
-        self.col * Self::WIDTH
+    pub(crate) fn row_range(&self) -> Range<u8> {
+        self.base_row..self.base_row + Self::HEIGHT
+    }
+
+    #[inline]
+    pub(crate) fn col_range(&self) -> Range<u8> {
+        self.base_col..self.base_col + Self::WIDTH
     }
 
     /// Rows within this sector.
-    pub fn rows(&self) -> impl Iterator<Item = Row> + DoubleEndedIterator + ExactSizeIterator + FusedIterator {
-        let start = self.base_row();
-        let end = start + Self::HEIGHT;
-        (start..end).map(|r| Row::new(r))
+    pub fn rows(
+        &self,
+    ) -> impl Iterator<Item = SectorRow> + DoubleEndedIterator + ExactSizeIterator + FusedIterator {
+        let copy = *self;
+        (0..Self::HEIGHT).map(move |r| SectorRow::new(copy, r))
     }
 
     /// Cols within this sector.
-    pub fn cols(&self) -> impl Iterator<Item = Col> + DoubleEndedIterator + ExactSizeIterator + FusedIterator {
-        let start = self.base_col();
-        let end = start + Self::WIDTH;
-        (start..end).map(|c| Col::new(c))
+    pub fn cols(
+        &self,
+    ) -> impl Iterator<Item = SectorCol> + DoubleEndedIterator + ExactSizeIterator + FusedIterator {
+        let copy = *self;
+        (0..Self::WIDTH).map(move |c| SectorCol::new(copy, c))
     }
 }
 
-/// Trait for getting row/col/coord relative to a sector.
-pub trait Relative {
-    type Rel;
+impl FixedSizeIndexable for Sector {
+    type Item = Coord;
 
-    fn to_rel(self, sec: &Sector) -> Option<Self::Rel>;
+    const NUM_ITEMS: usize = (Self::WIDTH * Self::HEIGHT) as usize;
 
-    fn from_rel(rel: Self::Rel, sec: &Sector) -> Self;
-}
-
-impl Relative for Row {
-    type Rel = u8;
-
-    #[inline]
-    fn to_rel(self, sec: &Sector) -> Option<Self::Rel> {
-        let base = sec.base_row();
-        if (base..base + Sector::HEIGHT).contains(&self.inner()) {
-            Some(self.inner() - base)
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    fn from_rel(rel: Self::Rel, sec: &Sector) -> Self {
-        (rel + sec.base_row()).into()
+    fn get_at_index(&self, idx: usize) -> Self::Item {
+        assert!(idx < Self::NUM_ITEMS, "index {} out of range", idx);
+        let idx = idx as u8;
+        let row_offset = idx / Self::WIDTH;
+        let col_offset = idx % Self::WIDTH;
+        Coord::new(self.base_row + row_offset, self.base_col + col_offset)
     }
 }
 
-impl Relative for Col {
-    type Rel = u8;
-
-    #[inline]
-    fn to_rel(self, sec: &Sector) -> Option<Self::Rel> {
-        let base = sec.base_col();
-        if (base..base + Sector::WIDTH).contains(&self.inner()) {
-            Some(self.inner() - base)
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    fn from_rel(rel: Self::Rel, sec: &Sector) -> Self {
-        (rel + sec.base_col()).into()
-    }
-}
-
-impl Relative for Coord {
-    type Rel = (u8, u8);
-
-    #[inline]
-    fn to_rel(self, sec: &Sector) -> Option<Self::Rel> {
-        match (self.row().to_rel(sec), self.col().to_rel(sec)) {
-            (Some(row), Some(col)) => Some((row, col)),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    fn from_rel((relr, relc): Self::Rel, sec: &Sector) -> Self {
-        (Row::from_rel(relr, sec), Col::from_rel(relc, sec)).into()
-    }
-}
-
-impl Zone for Sector {
-    type Coords = Coords;
-
-    #[inline]
-    fn coords(&self) -> Self::Coords {
-        Coords {
-            range: 0..9,
-            base_row: self.base_row(),
-            base_col: self.base_col(),
-        }
-    }
-
-    fn containing(coord: impl Into<Coord>) -> Self {
+impl ZoneContaining for Sector {
+    fn containing_zone(coord: impl Into<Coord>) -> Self {
         let coord = coord.into();
+        // Truncate relative row by integer division then multiplication.
         Sector {
-            row: coord.row().inner() / Self::HEIGHT,
-            col: coord.col().inner() / Self::WIDTH,
+            base_row: coord.row().inner() / Self::HEIGHT * Self::HEIGHT,
+            base_col: coord.col().inner() / Self::WIDTH * Self::WIDTH,
         }
-    }
-
-    #[inline]
-    fn contains(&self, coord: impl Into<Coord>) -> bool {
-        *self == Self::containing(coord)
     }
 }
 
@@ -159,7 +95,11 @@ impl FixedSizeIndex for Sector {
     const NUM_INDEXES: usize = Self::NUM_SECTORS as usize;
 
     fn idx(&self) -> usize {
-        (self.row * Self::SECTORS_ACROSS + self.col) as usize
+        // NOTE: We know that base_row = row * SECTORS_ACROSS. Otherwise this would be:
+        // self.base_row / Self::HEIGHT * SECTORS_ACROSS + self.base_col / Self::WIDTH
+        // The compiler cannot prove that base_row will be an exact multiple of HEIGHT,
+        // but we can.
+        (self.base_row + self.base_col / Self::WIDTH) as usize
     }
 
     fn from_idx(idx: usize) -> Self {
@@ -170,30 +110,15 @@ impl FixedSizeIndex for Sector {
             idx
         );
         let idx = idx as u8;
-        let row = idx / Self::SECTORS_ACROSS;
+        // Again, this logic is based on knowing that SECTORS_ACROSS = HEIGHT. It would be 
+        // wrong if those didn't match, just as in idx().
         let col = idx % Self::SECTORS_ACROSS;
-        Sector { row, col }
+        Sector { 
+            base_row: idx - col,
+            base_col: col * Self::WIDTH,
+        }
     }
 }
-
-pub struct Coords {
-    range: Range<u8>,
-    base_row: u8,
-    base_col: u8,
-}
-
-impl Coords {
-    #[inline]
-    fn build_coord(&self, idx: u8) -> Coord {
-        // Effectively converting back from row-major form, so we use width for
-        // both.
-        let row_offset = idx / Sector::WIDTH;
-        let col_offset = idx % Sector::WIDTH;
-        Coord::new(self.base_row + row_offset, self.base_col + col_offset)
-    }
-}
-
-zone_coords_iter!(Coords);
 
 #[cfg(test)]
 mod tests {
