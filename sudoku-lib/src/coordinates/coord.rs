@@ -1,8 +1,8 @@
 use std::iter::FusedIterator;
 
 use crate::collections::indexed::FixedSizeIndex;
-use crate::{Col, Row, Sector, Zone};
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
+use crate::{Col, Row, Sector, SectorCol, SectorRow, Zone};
 
 /// Coordinates of a single cell on the Sudoku board.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -53,19 +53,30 @@ impl Coord {
         Sector::containing(*self)
     }
 
+    /// Get the sector sub-row that this coordinate is in.
+    #[inline]
+    pub fn sector_row(&self) -> SectorRow {
+        SectorRow::containing(*self)
+    }
+
+    /// Get the sector sub-column that this coordinate is in.
+    #[inline]
+    pub fn sector_col(&self) -> SectorCol {
+        SectorCol::containing(*self)
+    }
+
     /// Get all coordinates in the same row, column, and sector as this
     /// coordinate.
-    pub fn neighbors(&self) -> impl Iterator<Item = Coord> + DoubleEndedIterator + FusedIterator {
-        let copy = *self;
+    pub fn neighbors(self) -> impl Iterator<Item = Coord> + DoubleEndedIterator + FusedIterator {
         self.row
             .coords()
             .chain(self.col.coords())
             .chain(
-                self.sector().coords().filter(move |&other| {
-                    !copy.row().contains(other) && !copy.col().contains(other)
-                }),
+                self.sector()
+                    .coords()
+                    .filter(move |&other| !self.row.contains(other) && !self.col.contains(other)),
             )
-            .filter(move |other| other != &copy)
+            .filter(move |other| *other != self)
     }
 }
 
@@ -85,6 +96,15 @@ impl FixedSizeIndexable for Coord {
     fn get_at_index(&self, idx: usize) -> Self::Item {
         assert!(idx < Self::NUM_ITEMS, "index {} out of range", idx);
         *self
+    }
+}
+
+impl IntoIterator for Coord {
+    type Item = Coord;
+    type IntoIter = std::iter::Once<Self>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        std::iter::once(self)
     }
 }
 
@@ -126,6 +146,50 @@ mod tests {
                 let coord = Coord::new(r, c);
                 let result: Vec<_> = coord.coords().collect();
                 assert_eq!(result, vec![coord]);
+            }
+        }
+    }
+
+    #[test]
+    fn coords_iter() {
+        let mut expected = Vec::with_capacity(81);
+        for r in 0..9 {
+            for c in 0..9 {
+                expected.push(Coord::new(r, c));
+            }
+        }
+        let result: Vec<_> = Coord::values().collect();
+        assert_eq!(result, expected);
+        for (idx, val) in result.iter().enumerate() {
+            assert_eq!(val.idx(), idx);
+        }
+    }
+
+    #[test]
+    fn coord_neighbors() {
+        for r in 0..9 {
+            for c in 0..9 {
+                let mut expected = Vec::with_capacity(20);
+                for cc in 0..9 {
+                    if cc != c {
+                        expected.push(Coord::new(r, cc));
+                    }
+                }
+                for rr in 0..9 {
+                    if rr != r {
+                        expected.push(Coord::new(rr, c));
+                    }
+                }
+                for rr in ((r - (r % 3))..).take(3) {
+                    for cc in ((c - (c % 3))..).take(3) {
+                        if rr != r && cc != c {
+                            expected.push(Coord::new(rr, cc));
+                        }
+                    }
+                }
+                let result: Vec<_> = Coord::new(r, c).neighbors().collect();
+                assert_eq!(result.len(), 20);
+                assert_eq!(result, expected);
             }
         }
     }

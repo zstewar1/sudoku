@@ -1,7 +1,7 @@
-use crate::{Col, Coord, Row, Sector, Zone, SectorRow, SectorCol};
+use crate::{Col, Coord, Row, Sector, SectorCol, SectorRow, Zone};
 
-pub(crate) mod rowsec;
 pub(crate) mod colsec;
+pub(crate) mod rowsec;
 
 /// Trait for the intersection of a zone with another type of zone.
 pub trait Intersect<Z: Zone> {

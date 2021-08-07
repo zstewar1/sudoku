@@ -1,6 +1,8 @@
-use crate::{Sector, Coord, Row, Intersect, SectorCol, Col};
-use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
+use std::iter::FusedIterator;
+
 use crate::collections::indexed::FixedSizeIndex;
+use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
+use crate::{Col, Coord, Intersect, Row, Sector, SectorCol};
 
 /// A row within a sector.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -14,10 +16,7 @@ pub struct SectorRow {
 impl SectorRow {
     #[inline]
     pub(in crate::coordinates) fn new(sector: Sector, rel_row: u8) -> Self {
-        SectorRow {
-            sector,
-            rel_row,
-        }
+        SectorRow { sector, rel_row }
     }
 
     /// Get the sector that this row is part of.
@@ -30,6 +29,16 @@ impl SectorRow {
     #[inline]
     pub fn row(&self) -> Row {
         Row::new(self.sector.base_row() + self.rel_row)
+    }
+
+    /// Iterator over all SectorRows in the rest of the sector and row.
+    pub fn neighbors(
+        self,
+    ) -> impl Iterator<Item = SectorRow> + DoubleEndedIterator + FusedIterator {
+        self.row()
+            .sector_rows()
+            .chain(self.sector.rows())
+            .filter(move |sr| *sr != self)
     }
 }
 
@@ -46,16 +55,15 @@ impl FixedSizeIndexable for SectorRow {
     }
 }
 
+fixed_size_indexable_into_iter!(SectorRow);
+
 impl ZoneContaining for SectorRow {
     #[inline]
     fn containing_zone(coord: impl Into<Coord>) -> Self {
         let coord = coord.into();
         let sector = Sector::containing_zone(coord);
         let rel_row = coord.row().inner() - sector.base_row();
-        SectorRow {
-            sector,
-            rel_row,
-        }
+        SectorRow { sector, rel_row }
     }
 }
 
@@ -150,3 +158,83 @@ reciprocal_intersect!(<SectorRow> for Row);
 reciprocal_intersect!(<SectorRow> for Col);
 reciprocal_intersect!(<SectorRow> for Sector);
 reciprocal_intersect!(<SectorRow> for SectorCol);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Zone;
+
+    #[test]
+    fn rowsec_iter() {
+        for br in (0..9).step_by(3) {
+            for bc in (0..9).step_by(3) {
+                for rr in 0..3 {
+                    let secrow = SectorRow {
+                        sector: Sector::new_unchecked(br, bc),
+                        rel_row: rr,
+                    };
+                    let mut expected = Vec::with_capacity(3);
+                    for c in (bc..).take(3) {
+                        expected.push(Coord::new(br + rr, c));
+                    }
+                    let result: Vec<_> = secrow.coords().collect();
+                    assert_eq!(result, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rowsecs_iter() {
+        let mut expected = Vec::with_capacity(27);
+        for br in (0..9).step_by(3) {
+            for bc in (0..9).step_by(3) {
+                for rr in 0..3 {
+                    expected.push(SectorRow {
+                        sector: Sector::new_unchecked(br, bc),
+                        rel_row: rr,
+                    });
+                }
+            }
+        }
+        let result: Vec<_> = SectorRow::values().collect();
+        assert_eq!(result, expected);
+        for (idx, val) in result.iter().enumerate() {
+            assert_eq!(val.idx(), idx);
+        }
+    }
+
+    #[test]
+    fn rowsec_neighbors() {
+        for br in (0..9).step_by(3) {
+            for bc in (0..9).step_by(3) {
+                for rr in 0..3 {
+                    let secrow = SectorRow {
+                        sector: Sector::new_unchecked(br, bc),
+                        rel_row: rr,
+                    };
+                    let mut expected = Vec::with_capacity(4);
+                    for bcc in (0..9).step_by(3) {
+                        if bcc != bc {
+                            expected.push(SectorRow {
+                                sector: Sector::new_unchecked(br, bcc),
+                                rel_row: rr,
+                            });
+                        }
+                    }
+                    for rrr in 0..3 {
+                        if rrr != rr {
+                            expected.push(SectorRow {
+                                sector: Sector::new_unchecked(br, bc),
+                                rel_row: rrr,
+                            });
+                        }
+                    }
+                    let result: Vec<_> = secrow.neighbors().collect();
+                    assert_eq!(result.len(), 4);
+                    assert_eq!(result, expected);
+                }
+            }
+        }
+    }
+}

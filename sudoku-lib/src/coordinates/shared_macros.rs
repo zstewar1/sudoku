@@ -15,6 +15,19 @@ macro_rules! rowcol_fromint {
     };
 }
 
+macro_rules! fixed_size_indexable_into_iter {
+    ($t:ty) => {
+        impl IntoIterator for $t {
+            type Item = Coord;
+            type IntoIter = crate::coordinates::Coords<$t>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.into()
+            }
+        }
+    };
+}
+
 macro_rules! reciprocal_intersect {
     (<$z1:ty> for $z2:ty) => {
         impl Intersect<$z1> for $z2 {

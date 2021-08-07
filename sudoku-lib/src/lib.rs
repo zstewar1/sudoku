@@ -1,21 +1,108 @@
-use std::collections::VecDeque;
+use std::cmp::{Ordering, PartialOrd};
+use std::num::NonZeroU8;
+use std::ops::RangeInclusive;
+use std::ops::{Index, IndexMut};
 
-pub use coordinates::{Col, Coord, Row, Sector, SectorRow, Intersect, Zone, SectorCol};
+use log::trace;
 
-use collections::availset::{AvailCounter, AvailSet};
+pub use coordinates::{Col, Coord, Intersect, Row, Sector, SectorCol, SectorRow, Zone};
+
 use collections::indexed::{FixedSizeIndex, IndexMap};
+use solve::remaining::RemainingTracker;
 
 mod collections;
 #[macro_use]
 mod coordinates;
+mod solve;
 
-/// Sudoku Board.
+/// A Sudoku Board value.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord)]
+pub struct Val(NonZeroU8);
+
+impl Val {
+    /// Minimum allowed value.
+    pub const MIN: u8 = 1;
+    /// Max allowed value.
+    pub const MAX: u8 = 9;
+
+    /// The range of values that are valid as part of the `Board`.
+    pub const VALID_RANGE: RangeInclusive<u8> = Self::MIN..=Self::MAX;
+
+    #[inline]
+    pub(crate) const unsafe fn new_unchecked(val: u8) -> Self {
+        Val(NonZeroU8::new_unchecked(val))
+    }
+
+    /// Create a new Val with the given value.
+    pub fn new(val: u8) -> Self {
+        assert!(
+            Self::VALID_RANGE.contains(&val),
+            "value must be in range [1, 9], got {}",
+            val
+        );
+        Val(unsafe { NonZeroU8::new_unchecked(val) })
+    }
+
+    /// Get the value as a u8.
+    #[inline]
+    pub const fn val(self) -> u8 {
+        self.0.get()
+    }
+}
+
+impl FixedSizeIndex for Val {
+    const NUM_INDEXES: usize = (Self::MAX - Self::MIN + 1) as usize;
+
+    #[inline]
+    fn idx(&self) -> usize {
+        (self.0.get() - 1) as usize
+    }
+
+    #[inline]
+    fn from_idx(idx: usize) -> Self {
+        assert!(
+            (0..Self::NUM_INDEXES).contains(&idx),
+            "Val index must be in range [0, {}), got {}",
+            Self::NUM_INDEXES,
+            idx
+        );
+        unsafe { Self::new_unchecked(idx as u8 + 1) }
+    }
+}
+
+impl PartialOrd for Val {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+macro_rules! val_fromint {
+    ($($t:ty),*) => {
+        $(
+            impl From<$t> for Val {
+                fn from(val: $t) -> Self {
+                    assert!(
+                        (Self::MIN as $t..=Self::MAX as $t).contains(&val),
+                        "value must be in range [1, 9], got {}",
+                        val,
+                    );
+                    unsafe { Val::new_unchecked(val as u8) }
+                }
+            }
+        )*
+    };
+}
+
+val_fromint!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize, isize);
+
+/// Sudoku board, with some values optionally specified.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Board(IndexMap<Coord, AvailSet>);
+pub struct Board(IndexMap<Coord, Option<Val>>);
 
 impl Board {
     /// Total size of the board.
-    pub const SIZE: usize = (Row::SIZE * Col::SIZE) as usize;
+    pub const SIZE: usize = IndexMap::<Coord, Option<Val>>::LEN;
 
     /// Create a new board with no positions specified.
     pub fn new() -> Self {
@@ -23,147 +110,179 @@ impl Board {
     }
 
     /// Manually specify the value of a particular position. Used for setup.
-    pub fn specify(&mut self, coord: impl Into<Coord>, val: u8) {
-        *self.cell_mut(coord) = AvailSet::only(val);
+    pub fn specify(&mut self, coord: impl Into<Coord>, val: impl Into<Val>) {
+        self[coord.into()] = Some(val.into());
+    }
+
+    /// Manually clear the value of a particular position. Used for setup.
+    pub fn clear(&mut self, coord: impl Into<Coord>) {
+        self[coord.into()] = None;
     }
 
     /// Get the value at a specific coordinate, if known.
-    pub fn get(&self, pos: impl Into<Coord>) -> Option<u8> {
-        self.cell(pos).get_single()
+    pub fn get(&self, coord: impl Into<Coord>) -> Option<Val> {
+        self[coord.into()]
     }
 
-    /// Consumes this board, returning a board with all positions known, if possible. If the board
-    /// cannot be solved, returns None.
-    pub fn solve(mut self) -> Option<Board> {
-        if !self.deductive_reduce() {
-            // If we cannot reduce the starting board, there must be conflicting numbers.
-            return None;
-        }
-        // deductive_reduce ensures there are not duplicated or conflicting numbers.
-        if self.is_solved() {
-            return Some(self);
-        }
-        // Because the inductive step always tries all values for the first empty cell, we don't have
-        // to worry about re-visiting the same possible solutions ever.
-        let mut stack = Vec::new();
-        stack.push(self);
-        while let Some(next) = stack.pop() {
-            for child in next.inductive_reduce() {
-                // inductive_reduce runs deductive_reduce and only returns possible steps towards
-                // the solution, so is_solved here is safe.
-                if child.is_solved() {
-                    return Some(child);
+    /// Attempts to solve this board, returning a board containing all solved values, if a
+    /// solution is possible. Otherwise returns None.
+    pub fn solve(&self) -> Option<Self> {
+        let mut stack = vec![(0, RemainingTracker::new(self))];
+        while let Some((depth, next)) = stack.pop() {
+            trace!("Trying board at depth {}", depth);
+            // Apply deductive rules to eliminate what we can and stop this stack-branch
+            // if the board is unsolveable.
+            if let Some(reduced) = solve::deductive::reduce(next) {
+                if reduced.is_solved() {
+                    trace!("Board solved");
+                    return Some(reduced.to_board());
+                } else {
+                    trace!("Board reduced but not yet solved.");
+                    let len = stack.len();
+                    for choice in reduced.specify_one() {
+                        stack.push((depth + 1, choice));
+                    }
+                    trace!("Pushed {} boards at depth {}", stack.len() - len, depth + 1);
                 }
-                stack.push(child);
+            } else {
+                trace!("Board could not be reduced.");
             }
         }
+        trace!("Ran out of boards to try.");
         // No solution found.
         None
     }
 
-    /// Iterate over all cell coords where the value is known (exactly 1 value left).
-    fn known_cells<'a>(
-        &'a self,
-    ) -> impl 'a + Iterator<Item = (Coord, &AvailSet)> + DoubleEndedIterator {
-        self.0.values().enumerate().filter_map(|(idx, v)| {
-            if v.is_single() {
-                Some((Coord::from_idx(idx), v))
-            } else {
-                None
-            }
-        })
+    /// Return true if the board is known to be unsolveable.
+    pub fn known_unsolveable(&self) -> bool {
+        RemainingTracker::new(self).known_unsolveable()
     }
 
-    /// Reduce this board by eliminating numbers that are definitely excluded.
-    /// Returns false if reduction eliminated all possible numbers from any cell, which means that
-    /// this board is unsolveable.
-    fn deductive_reduce(&mut self) -> bool {
-        // let mut rowsec = IndexMap::<(Row, Sector), AvailCounter>::new();
-        // let mut colsec = IndexMap::<(Col, Sector), AvailCounter>::new();
-
-        // for idx in 0..Self::SIZE {
-        //     let coord = Coord::from_flat_index(idx);
-        //     rowsec[(coord.row(), coord.sector())].add_all(&self.0[idx]);
-        //     colsec[(coord.col(), coord.sector())].add_all(&self.0[idx]);
-        // }
-
-        let mut queue: VecDeque<_> = self.known_cells().map(|(k, _)| k).collect();
-        while let Some(pos) = queue.pop_front() {
-            let val = self.get(pos).expect("Should only enqueue singular cells");
-            for neighbor in pos.neighbors() {
-                let n = self.cell_mut(neighbor);
-                // Don't revisit cells that didn't change.
-                if n.remove(val) {
-                    // If the last entry was removed from the cell, there is no solution from
-                    // here, so stop and return false.
-                    if n.is_empty() {
-                        return false;
-                    }
-
-                    // Whenever we successfully remove a value from a cell, also remove
-                    // from the corresponding row/col + sector intersects.
-                    // rowsec[(neighbor.row(), neighbor.sector())].remove(val);
-                    // colsec[(neighbor.col(), neighbor.sector())].remove(val);
-
-                    // If the neighbor has been reduced to having a single value left, then we
-                    // may be able to eliminate more values by visiting it again
-                    if n.is_single() && !queue.contains(&neighbor) {
-                        queue.push_back(neighbor);
-                    }
-                }
-            }
-        }
-        true
-    }
-
-    /// Inductively reduce the board by finding the fist cell that isn't fully specified and
-    /// returning copies of the board with every possible solution for that cell.
-    fn inductive_reduce<'a>(&'a self) -> impl 'a + Iterator<Item = Board> {
-        let cell = self
-            .0
-            .values()
-            .enumerate()
-            .find_map(|(idx, val)| {
-                if !val.is_single() {
-                    Some(Coord::from_idx(idx))
-                } else {
-                    None
-                }
-            })
-            .expect("Board is already solved or has cells with no remaining values");
-        let choices = self.cell(cell).iter();
-        choices.filter_map(move |val| {
-            let mut board = self.clone();
-            *board.cell_mut(cell) = AvailSet::only(val);
-            if board.deductive_reduce() {
-                Some(board)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Returns true if the board is solved. Note: this only checks if all
-    /// numbers have been singularized, it does not check whether any numbers
-    /// conflict. To prevent conflicts, you first need to run deductive_reduce.
-    fn is_solved(&self) -> bool {
-        self.0.values().all(|val| val.is_single())
-    }
-
-    fn cell(&self, pos: impl Into<Coord>) -> &AvailSet {
-        &self.0[pos.into()]
-    }
-
-    fn cell_mut(&mut self, pos: impl Into<Coord>) -> &mut AvailSet {
-        &mut self.0[pos.into()]
+    /// Return true if the board is solved.
+    pub fn is_solved(&self) -> bool {
+        RemainingTracker::new(self).is_solved()
     }
 }
 
 impl Default for Board {
     fn default() -> Self {
-        Board(IndexMap::with_value(AvailSet::all()))
+        Board(IndexMap::new())
     }
 }
+
+impl Index<Coord> for Board {
+    type Output = Option<Val>;
+
+    fn index(&self, coord: Coord) -> &Option<Val> {
+        &self.0[coord]
+    }
+}
+
+impl IndexMut<Coord> for Board {
+    fn index_mut(&mut self, coord: Coord) -> &mut Option<Val> {
+        &mut self.0[coord]
+    }
+}
+
+/// Reference to a particular row.
+///
+/// This type always exists behind a reference as a slice within a board. Taking
+/// the value out of the reference is undefined behavior.
+pub struct RowRef(Option<Val>);
+
+impl Index<Row> for Board {
+    type Output = RowRef;
+
+    fn index(&self, row: Row) -> &Self::Output {
+        let start = Coord::new(row, 0).idx();
+        let start: *const _ = &self.0.as_ref()[start];
+        unsafe { &*start.cast() }
+    }
+}
+
+impl IndexMut<Row> for Board {
+    fn index_mut(&mut self, row: Row) -> &mut Self::Output {
+        let start = Coord::new(row, 0).idx();
+        let start: *mut _ = &mut self.0.as_mut()[start];
+        unsafe { &mut *start.cast() }
+    }
+}
+
+impl Index<Col> for RowRef {
+    type Output = Option<Val>;
+
+    fn index(&self, col: Col) -> &Self::Output {
+        let start: *const _ = &self.0;
+        let offset = col.idx();
+        unsafe { &*start.add(offset) }
+    }
+}
+
+impl IndexMut<Col> for RowRef {
+    fn index_mut(&mut self, col: Col) -> &mut Self::Output {
+        let start: *mut _ = &mut self.0;
+        let offset = col.idx();
+        unsafe { &mut *start.add(offset) }
+    }
+}
+
+impl PartialEq for RowRef {
+    fn eq(&self, other: &Self) -> bool {
+        Col::values().all(|col| self[col] == other[col])
+    }
+}
+
+impl Eq for RowRef {}
+
+/// Reference to a particular row.
+///
+/// This type always exists behind a reference as a slice within a board. Taking
+/// the value out of the reference is undefined behavior.
+pub struct ColRef(Option<Val>);
+
+impl Index<Col> for Board {
+    type Output = ColRef;
+
+    fn index(&self, col: Col) -> &Self::Output {
+        let start = Coord::new(0, col).idx();
+        let start: *const _ = &self.0.as_ref()[start];
+        unsafe { &*start.cast() }
+    }
+}
+
+impl IndexMut<Col> for Board {
+    fn index_mut(&mut self, col: Col) -> &mut Self::Output {
+        let start = Coord::new(0, col).idx();
+        let start: *mut _ = &mut self.0.as_mut()[start];
+        unsafe { &mut *start.cast() }
+    }
+}
+
+impl Index<Row> for ColRef {
+    type Output = Option<Val>;
+
+    fn index(&self, row: Row) -> &Self::Output {
+        let start: *const _ = &self.0;
+        let offset = row.idx() * Col::NUM_INDEXES;
+        unsafe { &*start.add(offset) }
+    }
+}
+
+impl IndexMut<Row> for ColRef {
+    fn index_mut(&mut self, row: Row) -> &mut Self::Output {
+        let start: *mut _ = &mut self.0;
+        let offset = row.idx() * Col::NUM_INDEXES;
+        unsafe { &mut *start.add(offset) }
+    }
+}
+
+impl PartialEq for ColRef {
+    fn eq(&self, other: &Self) -> bool {
+        Row::values().all(|row| self[row] == other[row])
+    }
+}
+
+impl Eq for ColRef {}
 
 impl<T: AsRef<[u8]>> From<T> for Board {
     /// Convenience method for building a board for in a test. Use a single-dimensional vector of
@@ -176,11 +295,17 @@ impl<T: AsRef<[u8]>> From<T> for Board {
         let mut board = Board::new();
         for (cell, val) in board.0.values_mut().zip(values.iter().copied()) {
             if val != 0 {
-                *cell = AvailSet::only(val);
+                *cell = Some(val.into());
             }
         }
         board
     }
+}
+
+/// Set up for testing -- enables logging.
+#[cfg(test)]
+pub(crate) fn setup() {
+    let _ = env_logger::builder().is_test(true).try_init();
 }
 
 #[cfg(test)]
@@ -188,8 +313,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn val_indexes() {
+        let vals: Vec<_> = (1..=9).map(Val::new).collect();
+        let expected: Vec<_> = (0..9).collect();
+        let result: Vec<_> = vals.iter().map(|val| val.idx()).collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn vals() {
+        let expected: Vec<_> = (1..=9).map(Val::new).collect();
+        let result: Vec<_> = Val::values().collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
     #[rustfmt::skip]
-    fn test_solve() {
+    fn solve_puzzle1() {
+        crate::setup();
+
         let board = Board::from([
             0,0,0, 1,0,0, 0,0,0,
             0,0,0, 0,5,8, 6,0,1,
@@ -218,5 +360,13 @@ mod tests {
         ]);
         let res = board.solve();
         assert_eq!(res, Some(expected));
+    }
+
+    #[test]
+    fn solve_empty() {
+       crate::setup();
+    
+        let res = Board::new().solve();
+        assert!(res.is_some());
     }
 }

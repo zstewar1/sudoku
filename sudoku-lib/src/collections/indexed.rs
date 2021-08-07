@@ -59,6 +59,9 @@ impl<K, V> IndexMap<K, V>
 where
     K: FixedSizeIndex,
 {
+    /// Length of the map.
+    pub const LEN: usize = K::NUM_INDEXES;
+
     /// Iterator over all cells with their corresponding keys.
     #[allow(unused)]
     pub fn iter(
@@ -204,41 +207,3 @@ impl<I: FixedSizeIndex> DoubleEndedIterator for Values<I> {
 }
 
 impl<I: FixedSizeIndex> FusedIterator for Values<I> {}
-
-// impl FixedSizeIndex for (Row, Sector) {
-//     // Col size because that's the number of rows.
-//     const NUM_INDEXES: usize =
-//         Col::SIZE / Sector::HEIGHT as usize * Sector::NUM_SECTORS as usize;
-//
-//     fn idx(&self) -> Option<usize> {
-//         self.1
-//             .to_relative(self.0)
-//             .map(|rel_row| (rel_row * Sector::NUM_SECTORS) as usize + self.1.flat_index())
-//     }
-//
-//     fn from_idx(idx: usize) -> Self {
-//         assert!(idx < Self::NUM_INDEXES);
-//         let rel_row = (idx / Sector::NUM_SECTORS as usize) as u8;
-//         let sector = Sector::from_flat_index(idx % Sector::NUM_SECTORS as usize);
-//         (sector.from_relative(rel_row), sector)
-//     }
-// }
-//
-// impl FixedSizeIndex for (Col, Sector) {
-//     // Row size because that's the number of cols.
-//     const NUM_INDEXES: usize = Row::SIZE / Sector::WIDTH as usize * Sector::NUM_SECTORS as usize;
-//
-//     fn idx(&self) -> Option<usize> {
-//         self.1
-//             .to_relative(self.0)
-//             .map(|rel_col| (rel_col * Sector::NUM_SECTORS) as usize + self.1.flat_index())
-//     }
-//
-//     fn from_idx(idx: usize) -> Self {
-//         assert!(idx < Self::NUM_INDEXES);
-//         let rel_col = (idx / Sector::NUM_SECTORS as usize) as u8;
-//         let sector = Sector::from_flat_index(idx % Sector::NUM_SECTORS as usize);
-//         (sector.from_relative(rel_col), sector)
-//     }
-// }
-//

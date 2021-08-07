@@ -1,6 +1,8 @@
+use std::iter::FusedIterator;
+
 use crate::collections::indexed::FixedSizeIndex;
-use crate::coordinates::{ZoneContaining, FixedSizeIndexable};
-use crate::{Col, Coord, Zone};
+use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
+use crate::{Col, Coord, Sector, SectorRow, Zone};
 
 /// Uniquely identifies a single row on the sudoku board. That is all cells with
 /// the same y coordinate.
@@ -18,6 +20,14 @@ impl Row {
     #[inline]
     pub(crate) fn inner(self) -> u8 {
         self.0
+    }
+
+    pub(crate) fn sector_rows(
+        self,
+    ) -> impl Iterator<Item = SectorRow> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    {
+        (0..Sector::SECTORS_ACROSS)
+            .map(move |c| SectorRow::containing_zone((self, c * Sector::WIDTH)))
     }
 }
 
@@ -50,6 +60,8 @@ impl FixedSizeIndexable for Row {
     }
 }
 
+fixed_size_indexable_into_iter!(Row);
+
 impl ZoneContaining for Row {
     #[inline]
     fn containing_zone(coord: impl Into<Coord>) -> Self {
@@ -81,6 +93,19 @@ mod tests {
             let expected: Vec<_> = (0..9).map(|c| Coord::new(r, c)).collect();
             let result: Vec<_> = row.coords().collect();
             assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn rows_iter() {
+        let mut expected = Vec::with_capacity(9);
+        for r in 0..9 {
+            expected.push(Row::new(r));
+        }
+        let result: Vec<_> = Row::values().collect();
+        assert_eq!(result, expected);
+        for (idx, val) in result.iter().enumerate() {
+            assert_eq!(val.idx(), idx);
         }
     }
 }

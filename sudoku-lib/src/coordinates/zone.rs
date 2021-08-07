@@ -13,25 +13,41 @@ pub trait Zone:
 
     /// Get an iterator over all values of this zone.
     #[inline]
-    fn all() -> Values<Self> where Self: Sized {
+    fn all() -> Values<Self>
+    where
+        Self: Sized,
+    {
         Self::values()
     }
 
     /// Get an iterator over the coordinates of this zone.
-    fn coords(&self) -> Coords<Self> where Self: Sized;
+    fn coords(&self) -> Coords<Self>
+    where
+        Self: Sized;
 
     /// Whether this zone contains the given coordinate.
     fn contains(&self, coord: impl Into<Coord>) -> bool;
 
     /// Gets the zone of this type which contains the given coordinate.
     #[inline]
-    fn containing(coord: impl Into<Coord>) -> Self where Self: Sized {
+    fn containing(coord: impl Into<Coord>) -> Self
+    where
+        Self: Sized,
+    {
         ZoneContaining::containing_zone(coord)
     }
 }
 
-impl<Z> Zone for Z where
-    Z: FixedSizeIndex + FixedSizeIndexable<Item = Coord> + ZoneContaining + PartialEq + Eq + Hash + Copy + Clone
+impl<Z> Zone for Z
+where
+    Z: FixedSizeIndex
+        + FixedSizeIndexable<Item = Coord>
+        + ZoneContaining
+        + PartialEq
+        + Eq
+        + Hash
+        + Copy
+        + Clone,
 {
     #[inline]
     fn coords(&self) -> Coords<Self> {
