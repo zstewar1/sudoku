@@ -1,4 +1,5 @@
 use std::cmp::{Ordering, PartialOrd};
+use std::iter::FusedIterator;
 use std::num::NonZeroU8;
 use std::ops::RangeInclusive;
 use std::ops::{Index, IndexMut};
@@ -162,6 +163,50 @@ impl Board {
     pub fn is_solved(&self) -> bool {
         RemainingTracker::new(self).is_solved()
     }
+
+    /// Iterator over const references to the rows of this board.
+    pub fn rows(
+        &self,
+    ) -> impl '_ + Iterator<Item = &RowRef> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    {
+        Row::values().map(move |row| &self[row])
+    }
+
+    /// Iterator over mut references to the rows of this board.
+    pub fn rows_mut(
+        &mut self,
+    ) -> impl '_ + Iterator<Item = &mut RowRef> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    {
+        let mut start: *mut _ = &mut self.0.as_mut()[0];
+        (0..Row::NUM_INDEXES).map(move |_| {
+            // This is safe because rows won't alias.
+            let res = unsafe { &mut *start.cast() };
+            start = unsafe { start.add(Row::SIZE) };
+            res
+        })
+    }
+
+    /// Iterator over const references to the cols of this board.
+    pub fn cols(
+        &self,
+    ) -> impl '_ + Iterator<Item = &ColRef> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    {
+        Col::values().map(move |col| &self[col])
+    }
+
+    /// Iterator over mut references to the rows of this board.
+    pub fn cols_mut(
+        &mut self,
+    ) -> impl '_ + Iterator<Item = &mut RowRef> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    {
+        let mut start: *mut _ = &mut self.0.as_mut()[0];
+        (0..Col::NUM_INDEXES).map(move |_| {
+            // This is safe because we won't alias.
+            let res = unsafe { &mut *start.cast() };
+            start = unsafe { start.add(1) };
+            res
+        })
+    }
 }
 
 impl Default for Board {
@@ -189,6 +234,32 @@ impl IndexMut<Coord> for Board {
 /// This type always exists behind a reference as a slice within a board. Taking
 /// the value out of the reference is undefined behavior.
 pub struct RowRef(Option<Val>);
+
+impl RowRef {
+    /// Iterator over const references to the elements of this row.
+    pub fn iter(
+        &self,
+    ) -> impl '_ + Iterator<Item = &Option<Val>> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    {
+        Col::values().map(move |col| &self[col])
+    }
+
+    /// Iterator over mut references to the elements of this row.
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl '_
+           + Iterator<Item = &mut Option<Val>>
+           + DoubleEndedIterator
+           + ExactSizeIterator
+           + FusedIterator {
+        let start: *mut _ = &mut self.0;
+        Col::values().map(move |col| {
+            let offset = col.idx();
+            // This is safe (no aliasing) as long as col is unique for each iteration.
+            unsafe { &mut *start.add(offset) }
+        })
+    }
+}
 
 impl Index<Row> for Board {
     type Output = RowRef;
@@ -239,6 +310,32 @@ impl Eq for RowRef {}
 /// This type always exists behind a reference as a slice within a board. Taking
 /// the value out of the reference is undefined behavior.
 pub struct ColRef(Option<Val>);
+
+impl ColRef {
+    /// Iterator over const references to the elements of this col.
+    pub fn iter(
+        &self,
+    ) -> impl '_ + Iterator<Item = &Option<Val>> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    {
+        Row::values().map(move |row| &self[row])
+    }
+
+    /// Iterator over mut references to the elements of this col.
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl '_
+           + Iterator<Item = &mut Option<Val>>
+           + DoubleEndedIterator
+           + ExactSizeIterator
+           + FusedIterator {
+        let start: *mut _ = &mut self.0;
+        Row::values().map(move |row| {
+            let offset = row.idx() * Col::NUM_INDEXES;
+            // This is safe (no aliasing) as long as row is unique for each iteration.
+            unsafe { &mut *start.add(offset) }
+        })
+    }
+}
 
 impl Index<Col> for Board {
     type Output = ColRef;
