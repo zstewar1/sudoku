@@ -398,9 +398,18 @@ mod tests {
     #[test]
     fn avail_counter_to_avail() {
         let cases = &[
-            (AvailCounter(vec![0, 1, 0, 3, 4, 5, 0, 0, 1].into()), AvailSet(0b100111010)),
-            (AvailCounter(vec![1, 9, 3, 8, 4, 1, 2, 5, 9].into()), AvailSet(0x1ff)),
-            (AvailCounter(vec![0, 0, 0, 0, 0, 0, 0, 0, 0].into()), AvailSet(0)),
+            (
+                AvailCounter(vec![0, 1, 0, 3, 4, 5, 0, 0, 1].into()),
+                AvailSet(0b100111010),
+            ),
+            (
+                AvailCounter(vec![1, 9, 3, 8, 4, 1, 2, 5, 9].into()),
+                AvailSet(0x1ff),
+            ),
+            (
+                AvailCounter(vec![0, 0, 0, 0, 0, 0, 0, 0, 0].into()),
+                AvailSet(0),
+            ),
         ];
         for (input, expected) in cases {
             let result = input.avail();

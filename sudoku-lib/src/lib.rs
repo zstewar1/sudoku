@@ -284,24 +284,6 @@ impl PartialEq for ColRef {
 
 impl Eq for ColRef {}
 
-impl<T: AsRef<[u8]>> From<T> for Board {
-    /// Convenience method for building a board for in a test. Use a single-dimensional vector of
-    /// 81 cells. Unlike [`AvailSet::only`] and [`Board::specify`], 0 is accepted as a value, in
-    /// order to mark a cell as not having a specified value. This is instead of using `Option<u8>`
-    /// because it is more convenient for tests.
-    fn from(values: T) -> Self {
-        let values = values.as_ref();
-        assert!(values.len() == Self::SIZE);
-        let mut board = Board::new();
-        for (cell, val) in board.0.values_mut().zip(values.iter().copied()) {
-            if val != 0 {
-                *cell = Some(val.into());
-            }
-        }
-        board
-    }
-}
-
 /// Set up for testing -- enables logging.
 #[cfg(test)]
 pub(crate) fn setup() {
@@ -311,6 +293,48 @@ pub(crate) fn setup() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl From<[&str; 11]> for Board {
+        fn from(values: [&str; 11]) -> Self {
+            Self::from(&values[..])
+        }
+    }
+
+    impl From<&[&str]> for Board {
+        /// Convenience method for building a board for in a test. Use a
+        /// single-dimensional slice of 11 rows. 1-9 means that number, '|' must be
+        /// used as a column separator, ' ' means no value, and any other character
+        /// causes a panic. Each row must have eactly 11 characters (9 numbers + 2 separators).
+        /// Rows 3 and 7 must be "---+---+---"
+        fn from(rows: &[&str]) -> Self {
+            assert!(rows.len() == 11);
+            assert!(rows[3] == "---+---+---" && rows[7] == "---+---+---");
+            let mut board = Board::new();
+            for (r, &row) in
+                Row::values().zip(rows[0..3].iter().chain(&rows[4..7]).chain(&rows[8..11]))
+            {
+                for (c, val) in Col::values().zip(parse_row(row)) {
+                    board[Coord::new(r, c)] = val;
+                }
+            }
+            board
+        }
+    }
+
+    fn parse_row(row: &str) -> impl '_ + Iterator<Item = Option<Val>> {
+        let row = row.as_bytes();
+        assert!(row.len() == 11);
+        assert!(row[3] == b'|' && row[7] == b'|');
+        row[0..3]
+            .iter()
+            .chain(&row[4..7])
+            .chain(&row[8..11])
+            .map(|ch| match ch {
+                b'1'..=b'9' => Some(Val::new(ch - b'0')),
+                b' ' => None,
+                _ => panic!("unsupported val: {}", ch),
+            })
+    }
 
     #[test]
     fn val_indexes() {
@@ -328,44 +352,132 @@ mod tests {
     }
 
     #[test]
-    #[rustfmt::skip]
     fn solve_puzzle1() {
         crate::setup();
 
         let board = Board::from([
-            0,0,0, 1,0,0, 0,0,0,
-            0,0,0, 0,5,8, 6,0,1,
-            8,0,1, 3,6,0, 0,9,0,
-
-            5,0,0, 0,0,0, 4,0,3,
-            0,0,3, 6,0,1, 8,0,0,
-            6,0,4, 0,0,0, 0,0,7,
-
-            0,3,0, 0,8,4, 5,0,6,
-            1,0,5, 7,2,0, 0,0,0,
-            0,0,0, 0,0,3, 0,0,0,
+            "   |1  |   ",
+            "   | 58|6 1",
+            "8 1|36 | 9 ",
+            "---+---+---",
+            "5  |   |4 3",
+            "  3|6 1|8  ",
+            "6 4|   |  7",
+            "---+---+---",
+            " 3 | 84|5 6",
+            "1 5|72 |   ",
+            "   |  3|   ",
         ]);
         let expected = Board::from([
-            4,6,7, 1,9,2, 3,8,5,
-            3,2,9, 4,5,8, 6,7,1,
-            8,5,1, 3,6,7, 2,9,4,
-
-            5,1,8, 2,7,9, 4,6,3,
-            2,7,3, 6,4,1, 8,5,9,
-            6,9,4, 8,3,5, 1,2,7,
-
-            7,3,2, 9,8,4, 5,1,6,
-            1,4,5, 7,2,6, 9,3,8,
-            9,8,6, 5,1,3, 7,4,2,
+            "467|192|385",
+            "329|458|671",
+            "851|367|294",
+            "---+---+---",
+            "518|279|463",
+            "273|641|859",
+            "694|835|127",
+            "---+---+---",
+            "732|984|516",
+            "145|726|938",
+            "986|513|742",
         ]);
         let res = board.solve();
         assert_eq!(res, Some(expected));
     }
 
     #[test]
+    fn solve_puzzle2() {
+        crate::setup();
+
+        let board = Board::from([
+            "   |8  | 14",
+            "1 6|4  |75 ",
+            " 47|53 |   ",
+            "---+---+---",
+            "9  | 5 | 62",
+            "   |7 9|   ",
+            "63 | 4 |  5",
+            "---+---+---",
+            "   | 87|34 ",
+            " 14|  5|6 9",
+            "89 |  4|   ",
+        ]);
+        let expected = Board::from([
+            "359|876|214",
+            "186|492|753",
+            "247|531|896",
+            "---+---+---",
+            "978|153|462",
+            "425|769|138",
+            "631|248|975",
+            "---+---+---",
+            "562|987|341",
+            "714|325|689",
+            "893|614|527",
+        ]);
+        let res = board.solve();
+        assert_eq!(res, Some(expected));
+    }
+
+    #[test]
+    fn solve_puzzle3() {
+        crate::setup();
+
+        let board = Board::from([
+            " 49|   |65 ",
+            " 5 |8 7|  3",
+            "   |46 |   ",
+            "---+---+---",
+            "27 |   |   ",
+            "  4|5 1|8  ",
+            "   |   | 32",
+            "---+---+---",
+            "   | 42|   ",
+            "9  |3 6| 2 ",
+            " 27|   |31 ",
+        ]);
+        let expected = Board::from([
+            "749|213|658",
+            "156|897|243",
+            "832|465|971",
+            "---+---+---",
+            "278|634|195",
+            "394|521|867",
+            "615|789|432",
+            "---+---+---",
+            "563|142|789",
+            "981|376|524",
+            "427|958|316",
+        ]);
+        let res = board.solve();
+        assert_eq!(res, Some(expected));
+    }
+
+    #[test]
+    fn solve_bad() {
+        crate::setup();
+
+        let board = Board::from([
+            "349|   |65 ",
+            " 5 |8 7|  3",
+            "   |46 |   ",
+            "---+---+---",
+            "27 |   |   ",
+            "  4|5 1|8  ",
+            "   |   | 32",
+            "---+---+---",
+            "   | 42|   ",
+            "9  |3 6| 2 ",
+            " 27|   |31 ",
+        ]);
+        let res = board.solve();
+        assert_eq!(res, None);
+    }
+
+    #[test]
     fn solve_empty() {
-       crate::setup();
-    
+        crate::setup();
+
         let res = Board::new().solve();
         assert!(res.is_some());
     }
