@@ -233,6 +233,9 @@ impl IndexMut<Coord> for Board {
 ///
 /// This type always exists behind a reference as a slice within a board. Taking
 /// the value out of the reference is undefined behavior.
+// transparent is needed for correctness because the layout of rust types is unspecified to allow
+// for optimization.
+#[repr(transparent)]
 pub struct RowRef(Option<Val>);
 
 impl RowRef {
@@ -309,6 +312,9 @@ impl Eq for RowRef {}
 ///
 /// This type always exists behind a reference as a slice within a board. Taking
 /// the value out of the reference is undefined behavior.
+// transparent is needed for correctness because the layout of rust types is unspecified to allow
+// for optimization.
+#[repr(transparent)]
 pub struct ColRef(Option<Val>);
 
 impl ColRef {
