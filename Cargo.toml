@@ -1,5 +1,4 @@
 [workspace]
 members = [
-    "sudoku-server",
     "sudoku-solver",
 ]
