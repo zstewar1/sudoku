@@ -6,7 +6,7 @@ use std::ops::{Index, IndexMut};
 
 use log::trace;
 
-pub use coordinates::{Col, Coord, Intersect, Row, Sector, SectorCol, SectorRow, Zone, OutOfRange};
+pub use coordinates::{Col, Coord, Intersect, OutOfRange, Row, Sector, SectorCol, SectorRow, Zone};
 
 use collections::indexed::{FixedSizeIndex, IndexMap};
 use solve::remaining::RemainingTracker;
@@ -150,6 +150,18 @@ impl Board {
         RemainingTracker::new(self).is_solved()
     }
 
+    /// View of the board as a flat slice in row-major order.
+    #[inline]
+    pub fn row_major(&self) -> &[Option<Val>] {
+        self.0.as_ref()
+    }
+
+    /// Mutable view of the board as a flat slice in row-major order.
+    #[inline]
+    pub fn row_major_mut(&mut self) -> &mut [Option<Val>] {
+        self.0.as_mut()
+    }
+
     /// Iterator over const references to the rows of this board.
     pub fn rows(
         &self,
@@ -198,6 +210,18 @@ impl Board {
 impl Default for Board {
     fn default() -> Self {
         Board(IndexMap::new())
+    }
+}
+
+impl AsRef<[Option<Val>]> for Board {
+    fn as_ref(&self) -> &[Option<Val>] {
+        self.row_major()
+    }
+}
+
+impl AsMut<[Option<Val>]> for Board {
+    fn as_mut(&mut self) -> &mut [Option<Val>] {
+        self.row_major_mut()
     }
 }
 
