@@ -6,7 +6,7 @@ use rocket_contrib::json::Json;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use sudoku_lib::{Board, Coord};
+use sudoku_solver::{Board, Coord};
 
 /// Result of attempting to solve the sudoku puzzle.
 #[derive(Error, Debug, Responder)]

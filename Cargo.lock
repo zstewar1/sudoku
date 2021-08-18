@@ -1060,14 +1060,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
 
 [[package]]
-name = "sudoku-lib"
-version = "0.1.0"
-dependencies = [
- "env_logger",
- "log",
-]
-
-[[package]]
 name = "sudoku-server"
 version = "0.1.0"
 dependencies = [
@@ -1075,8 +1067,16 @@ dependencies = [
  "rocket_contrib",
  "serde",
  "serde_json",
- "sudoku-lib",
+ "sudoku-solver",
  "thiserror",
+]
+
+[[package]]
+name = "sudoku-solver"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "log",
 ]
 
 [[package]]
