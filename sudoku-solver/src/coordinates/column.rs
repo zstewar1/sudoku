@@ -2,6 +2,9 @@ use std::convert::TryInto;
 use std::fmt;
 use std::iter::FusedIterator;
 
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
+
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
 use crate::{Coord, Row, Sector, SectorCol, Zone};
@@ -9,6 +12,13 @@ use crate::{Coord, Row, Sector, SectorCol, Zone};
 /// Uniquely identifies a single column on the sudoku board. That is all cells
 /// with the same x coordinate.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[repr(transparent)]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize, Deserialize),
+    serde(try_from = "u8"),
+    serde(into = "u8")
+)]
 pub struct Col(u8);
 
 impl Col {
@@ -116,6 +126,37 @@ mod tests {
         assert_eq!(result, expected);
         for (idx, val) in result.iter().enumerate() {
             assert_eq!(val.idx(), idx);
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        #[test]
+        fn serialize() {
+            for c in 0..9 {
+                let col = Col::new(c);
+                let ser = serde_json::to_string(&col).expect("could not serialize");
+                assert_eq!(ser, c.to_string());
+            }
+        }
+
+        #[test]
+        fn deserialize() {
+            for c in 0..9 {
+                let expected = Col::new(c);
+                let de: Col = serde_json::from_str(&c.to_string()).expect("could not deserialize");
+                assert_eq!(de, expected);
+            }
+        }
+
+        #[test]
+        fn deserialize_out_of_range() {
+            for c in (-1024i32..0).chain(9..1024) {
+                let de: Result<Col, _> = serde_json::from_str(&c.to_string());
+                assert!(de.is_err());
+            }
         }
     }
 }

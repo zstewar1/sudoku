@@ -12,6 +12,12 @@ macro_rules! rowcol_fromint {
                     }
                 }
             }
+
+            impl From<$imp> for $t {
+                fn from(val: $imp) -> $t {
+                    val.0 as $t
+                }
+            }
         )*
     };
 }

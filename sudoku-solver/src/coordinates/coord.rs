@@ -2,12 +2,16 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FusedIterator;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
 use crate::{Col, OutOfRange, Row, Sector, SectorCol, SectorRow, Zone};
 
 /// Coordinates of a single cell on the Sudoku board.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Coord {
     /// Row (y).
     row: Row,
@@ -204,6 +208,62 @@ mod tests {
                 assert_eq!(result.len(), 20);
                 assert_eq!(result, expected);
             }
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        #[test]
+        fn serialize() {
+            for r in 0..9 {
+                for c in 0..9 {
+                    let coord = Coord::new(Row::new(r), Col::new(c));
+                    let ser = serde_json::to_string(&coord).expect("could not serialize");
+                    let expected = format!(r#"{{"row":{},"col":{}}}"#, r, c);
+                    assert_eq!(ser, expected);
+                }
+            }
+        }
+
+        #[test]
+        fn deserialize() {
+            for r in 0..9 {
+                for c in 0..9 {
+                    let expected = Coord::new(Row::new(r), Col::new(c));
+                    let inp = format!(r#"{{"row": {}, "col": {}}}"#, r, c);
+                    let de: Coord = serde_json::from_str(&inp).expect("could not deserialize");
+                    assert_eq!(de, expected);
+                }
+            }
+        }
+
+        #[test]
+        fn deserialize_out_of_range() {
+            for r in (-1024i32..0).chain(9..1024) {
+                for c in 0..9 {
+                    let inp = format!(r#"{{"row": {}, "col": {}}}"#, r, c);
+                    let de: Result<Coord, _> = serde_json::from_str(&inp);
+                    assert!(de.is_err());
+                }
+            }
+
+            for r in 0..9 {
+                for c in (-1024i32..0).chain(9..1024) {
+                    let inp = format!(r#"{{"row": {}, "col": {}}}"#, r, c);
+                    let de: Result<Coord, _> = serde_json::from_str(&inp);
+                    assert!(de.is_err());
+                }
+            }
+        }
+
+        #[test]
+        fn deserialize_bad_type() {
+            let de: Result<Coord, _> = serde_json::from_str(r#"{"row": null, "col": 3}"#);
+            assert!(de.is_err());
+            let de: Result<Coord, _> = serde_json::from_str(r#"{"row": "3", "col": 3}"#);
+            assert!(de.is_err());
         }
     }
 }
