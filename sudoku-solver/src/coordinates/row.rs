@@ -13,6 +13,7 @@ pub struct Row(u8);
 
 impl Row {
     /// Construt a row with the given index. Panic if out of bounds.
+    #[inline]
     pub fn new(val: u8) -> Self {
         assert!((0..Self::NUM_INDEXES as u8).contains(&val));
         Self(val)
@@ -38,8 +39,6 @@ impl fmt::Display for Row {
         write!(f, "row {}", self.0)
     }
 }
-
-rowcol_named_consts!(Row);
 
 rowcol_fromint!(
     Row,

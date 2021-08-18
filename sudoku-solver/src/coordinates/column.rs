@@ -13,6 +13,7 @@ pub struct Col(u8);
 
 impl Col {
     /// Construt a column with the given index. Panic if out of bounds.
+    #[inline]
     pub fn new(val: u8) -> Self {
         assert!((0..Self::NUM_INDEXES as u8).contains(&val));
         Self(val)
@@ -39,8 +40,6 @@ impl fmt::Display for Col {
         write!(f, "column {}", self.0)
     }
 }
-
-rowcol_named_consts!(Col);
 
 rowcol_fromint!(
     Col,

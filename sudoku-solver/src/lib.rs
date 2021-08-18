@@ -81,14 +81,15 @@ impl PartialOrd for Val {
 macro_rules! val_fromint {
     ($($t:ty),*) => {
         $(
-            impl From<$t> for Val {
-                fn from(val: $t) -> Self {
-                    assert!(
-                        (Self::MIN as $t..=Self::MAX as $t).contains(&val),
-                        "value must be in range [1, 9], got {}",
-                        val,
-                    );
-                    unsafe { Val::new_unchecked(val as u8) }
+            impl std::convert::TryFrom<$t> for Val {
+                type Error = OutOfRange<$t>;
+
+                fn try_from(val: $t) -> Result<Self, Self::Error> {
+                    if !(Self::MIN as $t..=Self::MAX as $t).contains(&val) {
+                        Err(OutOfRange(val))
+                    } else {
+                        Ok(unsafe { Val::new_unchecked(val as u8) })
+                    }
                 }
             }
         )*
@@ -253,7 +254,7 @@ impl Index<Row> for Board {
     type Output = RowRef;
 
     fn index(&self, row: Row) -> &Self::Output {
-        let start = Coord::new(row, Col::ZERO).idx();
+        let start = Coord::new(row, Col::new(0)).idx();
         let start: *const _ = &self.0.as_ref()[start];
         unsafe { &*start.cast() }
     }
@@ -261,7 +262,7 @@ impl Index<Row> for Board {
 
 impl IndexMut<Row> for Board {
     fn index_mut(&mut self, row: Row) -> &mut Self::Output {
-        let start = Coord::new(row, Col::ZERO).idx();
+        let start = Coord::new(row, Col::new(0)).idx();
         let start: *mut _ = &mut self.0.as_mut()[start];
         unsafe { &mut *start.cast() }
     }
@@ -332,7 +333,7 @@ impl Index<Col> for Board {
     type Output = ColRef;
 
     fn index(&self, col: Col) -> &Self::Output {
-        let start = Coord::new(Row::ZERO, col).idx();
+        let start = Coord::new(Row::new(0), col).idx();
         let start: *const _ = &self.0.as_ref()[start];
         unsafe { &*start.cast() }
     }
@@ -340,7 +341,7 @@ impl Index<Col> for Board {
 
 impl IndexMut<Col> for Board {
     fn index_mut(&mut self, col: Col) -> &mut Self::Output {
-        let start = Coord::new(Row::ZERO, col).idx();
+        let start = Coord::new(Row::new(0), col).idx();
         let start: *mut _ = &mut self.0.as_mut()[start];
         unsafe { &mut *start.cast() }
     }

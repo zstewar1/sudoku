@@ -16,22 +16,6 @@ macro_rules! rowcol_fromint {
     };
 }
 
-macro_rules! rowcol_named_consts {
-    ($imp:ident) => {
-        impl $imp {
-            pub const ZERO: $imp = $imp(0);
-            pub const ONE: $imp = $imp(1);
-            pub const TWO: $imp = $imp(2);
-            pub const THREE: $imp = $imp(3);
-            pub const FOUR: $imp = $imp(4);
-            pub const FIVE: $imp = $imp(5);
-            pub const SIX: $imp = $imp(6);
-            pub const SEVEN: $imp = $imp(7);
-            pub const EIGHT: $imp = $imp(8);
-        }
-    }
-}
-
 macro_rules! fixed_size_indexable_into_iter {
     ($t:ty) => {
         impl IntoIterator for $t {
