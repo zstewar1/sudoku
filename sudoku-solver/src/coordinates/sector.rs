@@ -1,5 +1,4 @@
 use std::iter::FusedIterator;
-use std::ops::Range;
 
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
@@ -8,10 +7,10 @@ use crate::{Col, Coord, Row, SectorCol, SectorRow, Zone};
 /// Identifies a single 3x3 sector on the sudoku board.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Sector {
-    /// Row (y) index of the sector out of 3.
-    base_row: u8,
-    /// Column (x) index of the sector out of 3.
-    base_col: u8,
+    /// Row (y) where the sector starts.
+    base_row: Row,
+    /// Column (x) where the sector starts.
+    base_col: Col,
 }
 
 impl Sector {
@@ -29,31 +28,14 @@ impl Sector {
     /// Total number of sectors.
     pub(crate) const NUM_SECTORS: u8 = Self::SECTORS_ACROSS * Self::SECTORS_DOWN;
 
-    /// Construct a sector from a pre-specified base row and base col. Only available to
-    /// tests.
-    #[cfg(test)]
-    pub(crate) const fn new_unchecked(base_row: u8, base_col: u8) -> Self {
-        Sector { base_row, base_col }
-    }
-
     #[inline]
-    pub(crate) fn base_row(&self) -> u8 {
+    pub(crate) fn base_row(&self) -> Row {
         self.base_row
     }
 
     #[inline]
-    pub(crate) fn base_col(&self) -> u8 {
+    pub(crate) fn base_col(&self) -> Col {
         self.base_col
-    }
-
-    #[inline]
-    pub(crate) fn row_range(&self) -> Range<u8> {
-        self.base_row..self.base_row + Self::HEIGHT
-    }
-
-    #[inline]
-    pub(crate) fn col_range(&self) -> Range<u8> {
-        self.base_col..self.base_col + Self::WIDTH
     }
 
     /// Rows within this sector.
@@ -61,8 +43,9 @@ impl Sector {
         &self,
     ) -> impl Iterator<Item = SectorRow> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
     {
-        let copy = *self;
-        (0..Self::HEIGHT).map(move |r| SectorRow::new(copy, r))
+        let base_col = self.base_col;
+        (self.base_row.inner()..self.base_row.inner() + Self::HEIGHT)
+            .map(move |r| SectorRow::new(Row::new(r), base_col))
     }
 
     /// Cols within this sector.
@@ -70,8 +53,9 @@ impl Sector {
         &self,
     ) -> impl Iterator<Item = SectorCol> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
     {
-        let copy = *self;
-        (0..Self::WIDTH).map(move |c| SectorCol::new(copy, c))
+        let base_row = self.base_row;
+        (self.base_col.inner()..self.base_col.inner() + Self::WIDTH)
+            .map(move |c| SectorCol::new(base_row, Col::new(c)))
     }
 }
 
@@ -83,10 +67,10 @@ impl FixedSizeIndexable for Sector {
     fn get_at_index(&self, idx: usize) -> Self::Item {
         assert!(idx < Self::NUM_ITEMS, "index {} out of range", idx);
         let idx = idx as u8;
-        let row_offset = idx / Self::WIDTH;
-        let col_offset = idx % Self::WIDTH;
-        let row = Row::new(self.base_row + row_offset);
-        let col = Col::new(self.base_col + col_offset);
+        let row_offset = (idx / Self::WIDTH) as u8;
+        let col_offset = (idx % Self::WIDTH) as u8;
+        let row = Row::new(self.base_row.inner() + row_offset);
+        let col = Col::new(self.base_col.inner() + col_offset);
         Coord::new(row, col)
     }
 }
@@ -97,8 +81,8 @@ impl ZoneContaining for Sector {
     fn containing_zone(coord: Coord) -> Self {
         // Truncate relative row by integer division then multiplication.
         Sector {
-            base_row: coord.row().inner() / Self::HEIGHT * Self::HEIGHT,
-            base_col: coord.col().inner() / Self::WIDTH * Self::WIDTH,
+            base_row: coord.row().sector_base(),
+            base_col: coord.col().sector_base(),
         }
     }
 }
@@ -111,7 +95,7 @@ impl FixedSizeIndex for Sector {
         // self.base_row / Self::HEIGHT * SECTORS_ACROSS + self.base_col / Self::WIDTH
         // The compiler cannot prove that base_row will be an exact multiple of HEIGHT,
         // but we can.
-        (self.base_row + self.base_col / Self::WIDTH) as usize
+        (self.base_row.inner() + self.base_col.inner() / Self::WIDTH) as usize
     }
 
     fn from_idx(idx: usize) -> Self {
@@ -126,8 +110,8 @@ impl FixedSizeIndex for Sector {
         // wrong if those didn't match, just as in idx().
         let col = idx % Self::SECTORS_ACROSS;
         Sector {
-            base_row: idx - col,
-            base_col: col * Self::WIDTH,
+            base_row: Row::new(idx - col),
+            base_col: Col::new(col * Self::WIDTH),
         }
     }
 }
@@ -180,8 +164,8 @@ mod tests {
         for r in (0..9).step_by(3) {
             for c in (0..9).step_by(3) {
                 expected.push(Sector {
-                    base_row: r,
-                    base_col: c,
+                    base_row: Row::new(r),
+                    base_col: Col::new(c),
                 })
             }
         }

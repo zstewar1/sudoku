@@ -35,6 +35,7 @@ impl Col {
         self.0
     }
 
+    /// Base-col for sectors that contain this col.
     pub(crate) fn sector_cols(
         self,
     ) -> impl Iterator<Item = SectorCol> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
@@ -42,6 +43,11 @@ impl Col {
         (0..Sector::SECTORS_DOWN).map(move |r| {
             SectorCol::containing_zone(Coord::new(Row::new(r * Sector::HEIGHT), self))
         })
+    }
+
+    /// Base-col for sectors that contain this col.
+    pub(crate) fn sector_base(self) -> Self {
+        Col(self.0 - self.0 % Sector::WIDTH)
     }
 }
 

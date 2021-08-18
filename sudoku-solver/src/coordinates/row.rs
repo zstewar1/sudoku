@@ -35,12 +35,18 @@ impl Row {
         self.0
     }
 
+    /// Iterator over `SectorRow` in this `Row`.
     pub(crate) fn sector_rows(
         self,
     ) -> impl Iterator<Item = SectorRow> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
     {
         (0..Sector::SECTORS_ACROSS)
             .map(move |c| SectorRow::containing_zone(Coord::new(self, Col::new(c * Sector::WIDTH))))
+    }
+
+    /// Base-row for sectors that contain this row.
+    pub(crate) fn sector_base(self) -> Self {
+        Row(self.0 - self.0 % Sector::HEIGHT)
     }
 }
 
