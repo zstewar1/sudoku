@@ -70,7 +70,7 @@ impl RemainingTracker {
         let mut board = Board::new();
         for (coord, avail) in self.board.iter() {
             if let Some(val) = avail.get_single() {
-                board.specify(coord, val);
+                board[coord] = Some(val);
             }
         }
         board

@@ -1,5 +1,6 @@
-use std::iter::FusedIterator;
+use std::convert::TryInto;
 use std::fmt;
+use std::iter::FusedIterator;
 
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
@@ -12,9 +13,9 @@ pub struct Row(u8);
 
 impl Row {
     /// Construt a row with the given index. Panic if out of bounds.
-    #[inline]
-    pub fn new(row: impl Into<Row>) -> Self {
-        row.into()
+    pub fn new(val: u8) -> Self {
+        assert!((0..Self::NUM_INDEXES as u8).contains(&val));
+        Self(val)
     }
 
     /// Unwrap the inner u8 value
@@ -28,7 +29,7 @@ impl Row {
     ) -> impl Iterator<Item = SectorRow> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
     {
         (0..Sector::SECTORS_ACROSS)
-            .map(move |c| SectorRow::containing_zone((self, c * Sector::WIDTH)))
+            .map(move |c| SectorRow::containing_zone(Coord::new(self, Col::new(c * Sector::WIDTH))))
     }
 }
 
@@ -37,6 +38,8 @@ impl fmt::Display for Row {
         write!(f, "row {}", self.0)
     }
 }
+
+rowcol_named_consts!(Row);
 
 rowcol_fromint!(
     Row,
@@ -63,7 +66,7 @@ impl FixedSizeIndexable for Row {
 
     #[inline]
     fn get_at_index(&self, idx: usize) -> Self::Item {
-        Coord::new(*self, idx)
+        Coord::new(*self, idx.try_into().expect("index out of range"))
     }
 }
 
@@ -71,8 +74,8 @@ fixed_size_indexable_into_iter!(Row);
 
 impl ZoneContaining for Row {
     #[inline]
-    fn containing_zone(coord: impl Into<Coord>) -> Self {
-        coord.into().row()
+    fn containing_zone(coord: Coord) -> Self {
+        coord.row()
     }
 }
 
@@ -85,7 +88,7 @@ impl FixedSizeIndex for Row {
     }
 
     fn from_idx(idx: usize) -> Self {
-        idx.into()
+        idx.try_into().expect("index out of range")
     }
 }
 
@@ -97,7 +100,7 @@ mod tests {
     fn row_iter() {
         for r in 0..9 {
             let row = Row::new(r);
-            let expected: Vec<_> = (0..9).map(|c| Coord::new(r, c)).collect();
+            let expected: Vec<_> = (0..9).map(|c| Coord::new(Row(r), Col::new(c))).collect();
             let result: Vec<_> = row.coords().collect();
             assert_eq!(result, expected);
         }

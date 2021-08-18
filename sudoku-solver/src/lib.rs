@@ -6,7 +6,7 @@ use std::ops::{Index, IndexMut};
 
 use log::trace;
 
-pub use coordinates::{Col, Coord, Intersect, Row, Sector, SectorCol, SectorRow, Zone};
+pub use coordinates::{Col, Coord, Intersect, Row, Sector, SectorCol, SectorRow, Zone, OutOfRange};
 
 use collections::indexed::{FixedSizeIndex, IndexMap};
 use solve::remaining::RemainingTracker;
@@ -108,21 +108,6 @@ impl Board {
     /// Create a new board with no positions specified.
     pub fn new() -> Self {
         Default::default()
-    }
-
-    /// Manually specify the value of a particular position. Used for setup.
-    pub fn specify(&mut self, coord: impl Into<Coord>, val: impl Into<Val>) {
-        self[coord.into()] = Some(val.into());
-    }
-
-    /// Manually clear the value of a particular position. Used for setup.
-    pub fn clear(&mut self, coord: impl Into<Coord>) {
-        self[coord.into()] = None;
-    }
-
-    /// Get the value at a specific coordinate, if known.
-    pub fn get(&self, coord: impl Into<Coord>) -> Option<Val> {
-        self[coord.into()]
     }
 
     /// Attempts to solve this board, returning a board containing all solved values, if a
@@ -268,7 +253,7 @@ impl Index<Row> for Board {
     type Output = RowRef;
 
     fn index(&self, row: Row) -> &Self::Output {
-        let start = Coord::new(row, 0).idx();
+        let start = Coord::new(row, Col::ZERO).idx();
         let start: *const _ = &self.0.as_ref()[start];
         unsafe { &*start.cast() }
     }
@@ -276,7 +261,7 @@ impl Index<Row> for Board {
 
 impl IndexMut<Row> for Board {
     fn index_mut(&mut self, row: Row) -> &mut Self::Output {
-        let start = Coord::new(row, 0).idx();
+        let start = Coord::new(row, Col::ZERO).idx();
         let start: *mut _ = &mut self.0.as_mut()[start];
         unsafe { &mut *start.cast() }
     }
@@ -347,7 +332,7 @@ impl Index<Col> for Board {
     type Output = ColRef;
 
     fn index(&self, col: Col) -> &Self::Output {
-        let start = Coord::new(0, col).idx();
+        let start = Coord::new(Row::ZERO, col).idx();
         let start: *const _ = &self.0.as_ref()[start];
         unsafe { &*start.cast() }
     }
@@ -355,7 +340,7 @@ impl Index<Col> for Board {
 
 impl IndexMut<Col> for Board {
     fn index_mut(&mut self, col: Col) -> &mut Self::Output {
-        let start = Coord::new(0, col).idx();
+        let start = Coord::new(Row::ZERO, col).idx();
         let start: *mut _ = &mut self.0.as_mut()[start];
         unsafe { &mut *start.cast() }
     }

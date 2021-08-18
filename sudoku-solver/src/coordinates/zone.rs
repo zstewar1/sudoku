@@ -26,11 +26,11 @@ pub trait Zone:
         Self: Sized;
 
     /// Whether this zone contains the given coordinate.
-    fn contains(&self, coord: impl Into<Coord>) -> bool;
+    fn contains(&self, coord: Coord) -> bool;
 
     /// Gets the zone of this type which contains the given coordinate.
     #[inline]
-    fn containing(coord: impl Into<Coord>) -> Self
+    fn containing(coord: Coord) -> Self
     where
         Self: Sized,
     {
@@ -55,7 +55,7 @@ where
     }
 
     #[inline]
-    fn contains(&self, coord: impl Into<Coord>) -> bool {
+    fn contains(&self, coord: Coord) -> bool {
         *self == Self::containing(coord)
     }
 }
@@ -76,7 +76,7 @@ pub trait FixedSizeIndexable {
 /// coordinate.
 pub trait ZoneContaining {
     /// Gets the zone of this type which contains the given coordinate.
-    fn containing_zone(coord: impl Into<Coord>) -> Self;
+    fn containing_zone(coord: Coord) -> Self;
 }
 
 /// Coords of a Zone.

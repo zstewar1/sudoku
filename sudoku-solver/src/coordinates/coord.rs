@@ -1,9 +1,10 @@
-use std::iter::FusedIterator;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::iter::FusedIterator;
 
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
-use crate::{Col, Row, Sector, SectorCol, SectorRow, Zone};
+use crate::{Col, OutOfRange, Row, Sector, SectorCol, SectorRow, Zone};
 
 /// Coordinates of a single cell on the Sudoku board.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -17,11 +18,8 @@ pub struct Coord {
 impl Coord {
     /// Construct a new coordinate. Since this is (row, col), note that it is (y, x).
     #[inline]
-    pub fn new(row: impl Into<Row>, col: impl Into<Col>) -> Self {
-        Coord {
-            row: row.into(),
-            col: col.into(),
-        }
+    pub fn new(row: Row, col: Col) -> Self {
+        Coord { row, col }
     }
 
     /// Get the row of this coordinate (y).
@@ -38,13 +36,13 @@ impl Coord {
 
     /// Set the row of this coordinate (y).
     #[inline]
-    pub fn set_row(&mut self, row: impl Into<Row>) {
+    pub fn set_row(&mut self, row: Row) {
         self.row = row.into();
     }
 
     /// Set the col of this coordinate (x).
     #[inline]
-    pub fn set_col(&mut self, col: impl Into<Col>) {
+    pub fn set_col(&mut self, col: Col) {
         self.col = col.into();
     }
 
@@ -87,10 +85,18 @@ impl fmt::Display for Coord {
     }
 }
 
-impl<T: Into<Row>, U: Into<Col>> From<(T, U)> for Coord {
+impl<T, U> TryFrom<(T, U)> for Coord
+where
+    T: TryInto<Row> + Copy + fmt::Debug,
+    U: TryInto<Col> + Copy + fmt::Debug,
+{
+    type Error = OutOfRange<(T, U)>;
+
     /// Converts an (y-row, x-col) pair to a Coordinate.
-    fn from((row, col): (T, U)) -> Self {
-        Coord::new(row, col)
+    fn try_from((row, col): (T, U)) -> Result<Self, Self::Error> {
+        let r = row.try_into().map_err(|_| OutOfRange((row, col)))?;
+        let c = col.try_into().map_err(|_| OutOfRange((row, col)))?;
+        Ok(Coord::new(r, c))
     }
 }
 
@@ -117,7 +123,7 @@ impl IntoIterator for Coord {
 
 impl ZoneContaining for Coord {
     #[inline]
-    fn containing_zone(coord: impl Into<Coord>) -> Self {
+    fn containing_zone(coord: Coord) -> Self {
         coord.into()
     }
 }
@@ -136,8 +142,8 @@ impl FixedSizeIndex for Coord {
             Self::NUM_INDEXES,
             idx
         );
-        let row = (idx / Col::NUM_INDEXES).into();
-        let col = (idx % Col::NUM_INDEXES).into();
+        let row = Row::new((idx / Col::NUM_INDEXES) as u8);
+        let col = Col::new((idx % Col::NUM_INDEXES) as u8);
         Coord { row, col }
     }
 }
@@ -150,7 +156,7 @@ mod tests {
     fn coord_iter() {
         for r in 0..9 {
             for c in 0..9 {
-                let coord = Coord::new(r, c);
+                let coord = Coord::new(Row::new(r), Col::new(c));
                 let result: Vec<_> = coord.coords().collect();
                 assert_eq!(result, vec![coord]);
             }
@@ -162,7 +168,7 @@ mod tests {
         let mut expected = Vec::with_capacity(81);
         for r in 0..9 {
             for c in 0..9 {
-                expected.push(Coord::new(r, c));
+                expected.push(Coord::new(Row::new(r), Col::new(c)));
             }
         }
         let result: Vec<_> = Coord::values().collect();
@@ -179,22 +185,22 @@ mod tests {
                 let mut expected = Vec::with_capacity(20);
                 for cc in 0..9 {
                     if cc != c {
-                        expected.push(Coord::new(r, cc));
+                        expected.push(Coord::new(Row::new(r), Col::new(cc)));
                     }
                 }
                 for rr in 0..9 {
                     if rr != r {
-                        expected.push(Coord::new(rr, c));
+                        expected.push(Coord::new(Row::new(rr), Col::new(c)));
                     }
                 }
                 for rr in ((r - (r % 3))..).take(3) {
                     for cc in ((c - (c % 3))..).take(3) {
                         if rr != r && cc != c {
-                            expected.push(Coord::new(rr, cc));
+                            expected.push(Coord::new(Row::new(rr), Col::new(cc)));
                         }
                     }
                 }
-                let result: Vec<_> = Coord::new(r, c).neighbors().collect();
+                let result: Vec<_> = Coord::new(Row::new(r), Col::new(c)).neighbors().collect();
                 assert_eq!(result.len(), 20);
                 assert_eq!(result, expected);
             }

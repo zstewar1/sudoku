@@ -51,7 +51,7 @@ impl FixedSizeIndexable for SectorCol {
         assert!(idx < Self::NUM_ITEMS, "index {} out of range", idx);
         let row = self.sector.base_row() + idx as u8;
         let col = self.sector.base_col() + self.rel_col;
-        Coord::new(row, col)
+        Coord::new(Row::new(row), Col::new(col))
     }
 }
 
@@ -59,7 +59,7 @@ fixed_size_indexable_into_iter!(SectorCol);
 
 impl ZoneContaining for SectorCol {
     #[inline]
-    fn containing_zone(coord: impl Into<Coord>) -> Self {
+    fn containing_zone(coord: Coord) -> Self {
         let coord = coord.into();
         let sector = Sector::containing_zone(coord);
         let rel_col = coord.col().inner() - sector.base_col();
@@ -162,7 +162,7 @@ mod tests {
                     };
                     let mut expected = Vec::with_capacity(3);
                     for r in (br..).take(3) {
-                        expected.push(Coord::new(r, bc + rc));
+                        expected.push(Coord::new(Row::new(r), Col::new(bc + rc)));
                     }
                     let result: Vec<_> = seccol.coords().collect();
                     assert_eq!(result, expected);

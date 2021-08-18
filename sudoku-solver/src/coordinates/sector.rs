@@ -85,15 +85,16 @@ impl FixedSizeIndexable for Sector {
         let idx = idx as u8;
         let row_offset = idx / Self::WIDTH;
         let col_offset = idx % Self::WIDTH;
-        Coord::new(self.base_row + row_offset, self.base_col + col_offset)
+        let row = Row::new(self.base_row + row_offset);
+        let col = Col::new(self.base_col + col_offset);
+        Coord::new(row, col)
     }
 }
 
 fixed_size_indexable_into_iter!(Sector);
 
 impl ZoneContaining for Sector {
-    fn containing_zone(coord: impl Into<Coord>) -> Self {
-        let coord = coord.into();
+    fn containing_zone(coord: Coord) -> Self {
         // Truncate relative row by integer division then multiplication.
         Sector {
             base_row: coord.row().inner() / Self::HEIGHT * Self::HEIGHT,
@@ -139,7 +140,7 @@ mod tests {
     fn sector_iter() {
         for r in 0..9 {
             for c in 0..9 {
-                let sector = Sector::containing((r, c));
+                let sector = Sector::containing(Coord::new(Row::new(r), Col::new(c)));
                 let baser = match r {
                     0 | 1 | 2 => 0,
                     3 | 4 | 5 => 3,
@@ -165,7 +166,7 @@ mod tests {
                 ];
                 let expected: Vec<_> = OFFSETS
                     .iter()
-                    .map(|&(offr, offc)| Coord::new(baser + offr, basec + offc))
+                    .map(|&(offr, offc)| Coord::new(Row::new(baser + offr), Col::new(basec + offc)))
                     .collect();
                 let result: Vec<_> = sector.coords().collect();
                 assert_eq!(result, expected);

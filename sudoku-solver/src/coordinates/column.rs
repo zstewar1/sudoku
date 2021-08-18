@@ -1,5 +1,6 @@
-use std::iter::FusedIterator;
+use std::convert::TryInto;
 use std::fmt;
+use std::iter::FusedIterator;
 
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
@@ -12,9 +13,9 @@ pub struct Col(u8);
 
 impl Col {
     /// Construt a column with the given index. Panic if out of bounds.
-    #[inline]
-    pub fn new(col: impl Into<Col>) -> Self {
-        col.into()
+    pub fn new(val: u8) -> Self {
+        assert!((0..Self::NUM_INDEXES as u8).contains(&val));
+        Self(val)
     }
 
     /// Unwrap the inner u8 value
@@ -27,8 +28,9 @@ impl Col {
         self,
     ) -> impl Iterator<Item = SectorCol> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
     {
-        (0..Sector::SECTORS_DOWN)
-            .map(move |r| SectorCol::containing_zone((r * Sector::HEIGHT, self)))
+        (0..Sector::SECTORS_DOWN).map(move |r| {
+            SectorCol::containing_zone(Coord::new(Row::new(r * Sector::HEIGHT), self))
+        })
     }
 }
 
@@ -37,6 +39,8 @@ impl fmt::Display for Col {
         write!(f, "column {}", self.0)
     }
 }
+
+rowcol_named_consts!(Col);
 
 rowcol_fromint!(
     Col,
@@ -63,7 +67,7 @@ impl FixedSizeIndexable for Col {
 
     #[inline]
     fn get_at_index(&self, idx: usize) -> Self::Item {
-        Coord::new(idx, *self)
+        Coord::new(idx.try_into().expect("index out of range"), *self)
     }
 }
 
@@ -71,8 +75,8 @@ fixed_size_indexable_into_iter!(Col);
 
 impl ZoneContaining for Col {
     #[inline]
-    fn containing_zone(coord: impl Into<Coord>) -> Self {
-        coord.into().col()
+    fn containing_zone(coord: Coord) -> Self {
+        coord.col()
     }
 }
 
@@ -85,7 +89,7 @@ impl FixedSizeIndex for Col {
     }
 
     fn from_idx(idx: usize) -> Self {
-        idx.into()
+        idx.try_into().expect("index out of range")
     }
 }
 
@@ -97,7 +101,7 @@ mod tests {
     fn col_iter() {
         for c in 0..9 {
             let col = Col::new(c);
-            let expected: Vec<_> = (0..9).map(|r| Coord::new(r, c)).collect();
+            let expected: Vec<_> = (0..9).map(|r| Coord::new(Row::new(r), Col(c))).collect();
             let result: Vec<_> = col.coords().collect();
             assert_eq!(result, expected);
         }
