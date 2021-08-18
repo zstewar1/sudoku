@@ -1,4 +1,5 @@
 use std::iter::FusedIterator;
+use std::fmt;
 
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
@@ -77,6 +78,12 @@ impl Coord {
                     .filter(move |&other| !self.row.contains(other) && !self.col.contains(other)),
             )
             .filter(move |other| *other != self)
+    }
+}
+
+impl fmt::Display for Coord {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}", self.row, self.col)
     }
 }
 

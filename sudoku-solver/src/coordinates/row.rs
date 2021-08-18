@@ -1,4 +1,5 @@
 use std::iter::FusedIterator;
+use std::fmt;
 
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
@@ -28,6 +29,12 @@ impl Row {
     {
         (0..Sector::SECTORS_ACROSS)
             .map(move |c| SectorRow::containing_zone((self, c * Sector::WIDTH)))
+    }
+}
+
+impl fmt::Display for Row {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "row {}", self.0)
     }
 }
 

@@ -1,4 +1,5 @@
 use std::iter::FusedIterator;
+use std::fmt;
 
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
@@ -28,6 +29,12 @@ impl Col {
     {
         (0..Sector::SECTORS_DOWN)
             .map(move |r| SectorCol::containing_zone((r * Sector::HEIGHT, self)))
+    }
+}
+
+impl fmt::Display for Col {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "column {}", self.0)
     }
 }
 
