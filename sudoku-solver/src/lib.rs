@@ -1,4 +1,5 @@
 use std::cmp::{Ordering, PartialOrd};
+use std::convert::{TryFrom, TryInto};
 use std::iter::FusedIterator;
 use std::num::NonZeroU8;
 use std::ops::RangeInclusive;
@@ -8,6 +9,7 @@ use log::trace;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub use collections::indexed::IncorrectSize;
 pub use coordinates::{Col, Coord, Intersect, OutOfRange, Row, Sector, SectorCol, SectorRow, Zone};
 
 use collections::indexed::{FixedSizeIndex, IndexMap};
@@ -115,6 +117,8 @@ val_fromint!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize, isize);
 
 /// Sudoku board, with some values optionally specified.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[repr(transparent)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(transparent))]
 pub struct Board(IndexMap<Coord, Option<Val>>);
 
 impl Board {
@@ -251,6 +255,36 @@ impl Index<Coord> for Board {
 impl IndexMut<Coord> for Board {
     fn index_mut(&mut self, coord: Coord) -> &mut Option<Val> {
         &mut self.0[coord]
+    }
+}
+
+impl TryFrom<Vec<Option<Val>>> for Board {
+    type Error = IncorrectSize<Coord, Option<Val>, Vec<Option<Val>>>;
+
+    fn try_from(data: Vec<Option<Val>>) -> Result<Self, Self::Error> {
+        Ok(Board(data.try_into()?))
+    }
+}
+
+impl TryFrom<Box<[Option<Val>]>> for Board {
+    type Error = IncorrectSize<Coord, Option<Val>, Box<[Option<Val>]>>;
+
+    fn try_from(data: Box<[Option<Val>]>) -> Result<Self, Self::Error> {
+        Ok(Board(data.try_into()?))
+    }
+}
+
+impl From<Board> for Vec<Option<Val>> {
+    #[inline]
+    fn from(board: Board) -> Self {
+        board.0.into()
+    }
+}
+
+impl From<Board> for Box<[Option<Val>]> {
+    #[inline]
+    fn from(board: Board) -> Self {
+        board.0.into()
     }
 }
 
