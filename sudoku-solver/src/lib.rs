@@ -5,6 +5,8 @@ use std::ops::RangeInclusive;
 use std::ops::{Index, IndexMut};
 
 use log::trace;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 pub use coordinates::{Col, Coord, Intersect, OutOfRange, Row, Sector, SectorCol, SectorRow, Zone};
 
@@ -18,6 +20,13 @@ mod solve;
 
 /// A Sudoku Board value.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord)]
+#[repr(transparent)]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize, Deserialize),
+    serde(try_from = "u8"),
+    serde(into = "u8")
+)]
 pub struct Val(NonZeroU8);
 
 impl Val {
@@ -90,6 +99,12 @@ macro_rules! val_fromint {
                     } else {
                         Ok(unsafe { Val::new_unchecked(val as u8) })
                     }
+                }
+            }
+
+            impl From<Val> for $t {
+                fn from(val: Val) -> $t {
+                    val.val() as $t
                 }
             }
         )*

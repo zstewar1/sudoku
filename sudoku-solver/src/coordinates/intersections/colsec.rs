@@ -1,13 +1,21 @@
 use std::iter::FusedIterator;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
 use crate::{Col, Coord, Intersect, Row, Sector};
 
 /// A column within a sector.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SectorCol {
     /// The row that the sector starts at.
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "crate::coordinates::serde_utils::deserialize_base_row")
+    )]
     base_row: Row,
     /// The column.
     col: Col,

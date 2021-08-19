@@ -1,15 +1,27 @@
 use std::iter::FusedIterator;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
 use crate::{Col, Coord, Row, SectorCol, SectorRow, Zone};
 
 /// Identifies a single 3x3 sector on the sudoku board.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Sector {
     /// Row (y) where the sector starts.
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "crate::coordinates::serde_utils::deserialize_base_row")
+    )]
     base_row: Row,
     /// Column (x) where the sector starts.
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "crate::coordinates::serde_utils::deserialize_base_col")
+    )]
     base_col: Col,
 }
 
