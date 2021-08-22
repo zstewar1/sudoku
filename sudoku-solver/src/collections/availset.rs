@@ -1,45 +1,46 @@
 use std::iter::FusedIterator;
 use std::ops::{Add, AddAssign, BitOr, BitOrAssign, Index, IndexMut, Not, Sub, SubAssign};
 
-use crate::{FixedSizeIndex, Val};
+use crate::collections::indexed::IndexMap;
+use crate::{FixedSizeIndex, Val, Values};
 
 /// Set of available numbers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct AvailSet(u16);
+pub struct AvailSet(u16);
 
 impl AvailSet {
     /// Create a new AvailSet with all values available.
     #[inline]
-    pub(crate) const fn all() -> Self {
+    pub const fn all() -> Self {
         AvailSet(0x1ff)
     }
 
     /// Create an AvailSet with no values available.
     #[inline]
-    pub(crate) const fn none() -> Self {
+    pub const fn none() -> Self {
         AvailSet(0)
     }
 
     /// Create an AvailSet containing only the given value.
     #[inline]
-    pub(crate) fn only(val: Val) -> Self {
+    pub fn only(val: Val) -> Self {
         AvailSet(AvailSet::to_mask(val))
     }
 
     /// Returns true if there are no more values available.
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.0 == 0
     }
 
     /// Returns true if this set contains a single element.
     #[inline]
-    pub(crate) fn is_single(&self) -> bool {
+    pub fn is_single(&self) -> bool {
         self.len() == 1
     }
 
     /// If there is only a single entry, returns that entry.
-    pub(crate) fn get_single(&self) -> Option<Val> {
+    pub fn get_single(&self) -> Option<Val> {
         if self.is_single() {
             let v = (self.0.trailing_zeros() + 1) as u8;
             Some(unsafe { Val::new_unchecked(v) })
@@ -50,8 +51,7 @@ impl AvailSet {
 
     /// Add the given value to the set. Return true if the value was not in the
     /// set previously.
-    #[allow(unused)]
-    pub(crate) fn add(&mut self, val: Val) -> bool {
+    pub fn add(&mut self, val: Val) -> bool {
         let added = !self.contains(val);
         *self |= val;
         added
@@ -59,20 +59,20 @@ impl AvailSet {
 
     /// Remove the given value from the set. Return true if the value was in the
     /// set previously.
-    pub(crate) fn remove(&mut self, val: Val) -> bool {
+    pub fn remove(&mut self, val: Val) -> bool {
         let had = self.contains(val);
         *self -= val;
         had
     }
 
     /// Returns true if the set contains the given value.
-    pub(crate) fn contains(&self, val: Val) -> bool {
+    pub fn contains(&self, val: Val) -> bool {
         self.0 & Self::to_mask(val) != 0
     }
 
     /// Counts the number of values in this set.
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.0.count_ones() as usize
     }
 
@@ -83,7 +83,7 @@ impl AvailSet {
 
     /// Iterator over values available in this set. Note that the iterator is non-borrowing,
     /// because it isn't necessary to keep a borrow for the iterator to work.
-    pub(crate) fn iter(self) -> impl Iterator<Item = Val> + DoubleEndedIterator + FusedIterator {
+    pub fn iter(self) -> AvailSetIter {
         self.into_iter()
     }
 }
@@ -144,6 +144,7 @@ impl IntoIterator for AvailSet {
 
     fn into_iter(self) -> Self::IntoIter {
         AvailSetIter {
+            // We use range exclusive because it's easier to work with.
             vals: Val::values(),
             set: self,
         }
@@ -151,7 +152,7 @@ impl IntoIterator for AvailSet {
 }
 
 pub struct AvailSetIter {
-    vals: crate::collections::indexed::Values<Val>,
+    vals: Values<Val>,
     set: AvailSet,
 }
 
@@ -170,8 +171,19 @@ impl Iterator for AvailSetIter {
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let (_, max) = self.vals.size_hint();
-        (0, max)
+        let range = self.vals.range();
+        // Mask that includes only already-visited bits from the low end of the
+        // range.
+        let low_mask = (1 << range.start) - 1;
+        // Mask that includes only those bits up to but not including the high
+        // end of the range.
+        let high_mask = (1 << range.end) - 1;
+        // Cut down to just those bits in the high-end mask and excluding those
+        // in the lower-end mask.
+        let mask = high_mask & (!low_mask);
+        let size = (self.set.0 & mask).count_ones() as usize;
+
+        (size, Some(size))
     }
 
     #[inline]
@@ -179,6 +191,8 @@ impl Iterator for AvailSetIter {
         self.next_back()
     }
 }
+
+impl ExactSizeIterator for AvailSetIter {}
 
 impl DoubleEndedIterator for AvailSetIter {
     fn next_back(&mut self) -> Option<Self::Item> {
@@ -198,7 +212,7 @@ impl FusedIterator for AvailSetIter {}
 /// intended for tracking what's left in entire rows, columns, or sectors, or
 /// intersections thereof.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct AvailCounter(Box<[u8]>);
+pub(crate) struct AvailCounter(IndexMap<Val, u8>);
 
 impl AvailCounter {
     /// Create an AvailCounter with zero of every number.
@@ -209,7 +223,7 @@ impl AvailCounter {
 
     /// Create an AvailCounter with the given value for every number.
     pub(crate) fn with_count(count: u8) -> Self {
-        AvailCounter(vec![count; Val::VALID_RANGE.len()].into_boxed_slice())
+        AvailCounter(IndexMap::with_value(count))
     }
 
     /// Add one of the given number to the counter. Return the updated count.
@@ -243,7 +257,7 @@ impl AvailCounter {
 
     /// Remove one of every value except the given value.
     pub(crate) fn remove_except(&mut self, val: Val) {
-        let (lower, mut upper) = self.0.split_at_mut(val.idx());
+        let (lower, mut upper) = self.0.split_at_mut(val);
         upper = &mut upper[1..];
         for count in lower.iter_mut().chain(upper.iter_mut()) {
             *count = count.saturating_sub(1);
@@ -262,23 +276,20 @@ impl AvailCounter {
     }
 
     /// Iterator over the counts of the values.
-    pub(crate) fn counts<'a>(
-        &'a self,
-    ) -> impl 'a + Iterator<Item = (Val, &u8)> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    pub(crate) fn counts(
+        &self,
+    ) -> impl Iterator<Item = (Val, &u8)> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
     {
-        Val::values().zip(self.0.iter())
+        self.0.iter()
     }
 
     /// Iterator over the mutable counts of the values.
     #[allow(unused)]
-    pub(crate) fn counts_mut<'a>(
-        &'a mut self,
-    ) -> impl 'a
-           + Iterator<Item = (Val, &mut u8)>
-           + DoubleEndedIterator
-           + ExactSizeIterator
-           + FusedIterator {
-        Val::values().zip(self.0.iter_mut())
+    pub(crate) fn counts_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (Val, &mut u8)> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
+    {
+        self.0.iter_mut()
     }
 }
 
@@ -293,13 +304,13 @@ impl Index<Val> for AvailCounter {
     type Output = u8;
 
     fn index(&self, val: Val) -> &Self::Output {
-        &self.0[val.idx()]
+        &self.0[val]
     }
 }
 
 impl IndexMut<Val> for AvailCounter {
     fn index_mut(&mut self, val: Val) -> &mut Self::Output {
-        &mut self.0[val.idx()]
+        &mut self.0[val]
     }
 }
 
@@ -332,7 +343,7 @@ impl AddAssign for AvailCounter {
 
 impl AddAssign<&AvailCounter> for AvailCounter {
     fn add_assign(&mut self, other: &AvailCounter) {
-        for (ct, &add) in self.0.iter_mut().zip(other.0.iter()) {
+        for (ct, &add) in self.0.values_mut().zip(other.0.values()) {
             *ct = ct.checked_add(add).expect("overflowed count");
         }
     }
@@ -377,7 +388,7 @@ impl SubAssign for AvailCounter {
 
 impl SubAssign<&AvailCounter> for AvailCounter {
     fn sub_assign(&mut self, other: &AvailCounter) {
-        for (ct, &sub) in self.0.iter_mut().zip(other.0.iter()) {
+        for (ct, &sub) in self.0.values_mut().zip(other.0.values()) {
             *ct = ct.saturating_sub(sub)
         }
     }
@@ -391,23 +402,70 @@ impl SubAssign<AvailSet> for AvailCounter {
     }
 }
 
+#[cfg(feature = "serde")]
+mod serde {
+    use std::fmt;
+
+    use serde::de::{SeqAccess, Visitor};
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::AvailSet;
+
+    impl Serialize for AvailSet {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut seq = serializer.serialize_seq(Some(self.len()))?;
+            for val in self.iter() {
+                seq.serialize_element(&val)?;
+            }
+            seq.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for AvailSet {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            deserializer.deserialize_seq(AvailSetVisitor)
+        } 
+    }
+
+    struct AvailSetVisitor;
+
+    impl<'de> Visitor<'de> for AvailSetVisitor {
+        type Value = AvailSet;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a sequence of values from 1-9")
+        }
+
+        fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
+            let mut set = AvailSet::none();
+            while let Some(next) = seq.next_element()? {
+                set |= next;
+            }
+            Ok(set)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::convert::TryInto;
+
     use super::*;
 
     #[test]
     fn avail_counter_to_avail() {
         let cases = &[
             (
-                AvailCounter(vec![0, 1, 0, 3, 4, 5, 0, 0, 1].into()),
+                AvailCounter(vec![0, 1, 0, 3, 4, 5, 0, 0, 1].try_into().unwrap()),
                 AvailSet(0b100111010),
             ),
             (
-                AvailCounter(vec![1, 9, 3, 8, 4, 1, 2, 5, 9].into()),
+                AvailCounter(vec![1, 9, 3, 8, 4, 1, 2, 5, 9].try_into().unwrap()),
                 AvailSet(0x1ff),
             ),
             (
-                AvailCounter(vec![0, 0, 0, 0, 0, 0, 0, 0, 0].into()),
+                AvailCounter(vec![0, 0, 0, 0, 0, 0, 0, 0, 0].try_into().unwrap()),
                 AvailSet(0),
             ),
         ];
@@ -415,5 +473,20 @@ mod tests {
             let result = input.avail();
             assert_eq!(result, *expected);
         }
+    }
+
+    #[test]
+    fn availset_iter_size() {
+        let mut iter = AvailSet(0b010_010_110).iter();
+        assert_eq!(iter.len(), 4);
+        assert_eq!(iter.next(), Some(Val::new(2)));
+        assert_eq!(iter.len(), 3);
+        assert_eq!(iter.next_back(), Some(Val::new(8)));
+        assert_eq!(iter.len(), 2);
+        assert_eq!(iter.next(), Some(Val::new(3)));
+        assert_eq!(iter.len(), 1);
+        assert_eq!(iter.next(), Some(Val::new(5)));
+        assert_eq!(iter.len(), 0);
+        assert_eq!(iter.next(), None);
     }
 }

@@ -1,8 +1,8 @@
 use std::hash::Hash;
 use std::ops::Range;
 
-use crate::collections::indexed::{FixedSizeIndex, Values};
-use crate::Coord;
+use crate::collections::indexed::FixedSizeIndex;
+use crate::{Coord, Values};
 
 /// A zone of the board is an area that must uniquely contain all numbers 1-9.
 /// This is an abstraction over row, column, and sector.

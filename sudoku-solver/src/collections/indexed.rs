@@ -44,15 +44,8 @@ where
 {
     /// Construct an indexed map with the given value for each cell.
     pub fn with_value(val: V) -> Self {
-        let mut data = Vec::with_capacity(K::NUM_INDEXES);
-        for _ in 0..K::NUM_INDEXES - 1 {
-            data.push(val.clone());
-        }
-        if K::NUM_INDEXES > 0 {
-            data.push(val);
-        }
         IndexMap {
-            data: data.into_boxed_slice(),
+            data: vec![val; K::NUM_INDEXES].into_boxed_slice(),
             _key: PhantomData,
         }
     }
@@ -66,7 +59,6 @@ where
     pub const LEN: usize = K::NUM_INDEXES;
 
     /// Iterator over all data with their corresponding keys.
-    #[allow(unused)]
     pub fn iter(
         &self,
     ) -> impl Iterator<Item = (K, &V)> + ExactSizeIterator + DoubleEndedIterator + FusedIterator
@@ -75,7 +67,6 @@ where
     }
 
     /// Iterator over all mut data with their corresponding keys.
-    #[allow(unused)]
     pub fn iter_mut(
         &mut self,
     ) -> impl Iterator<Item = (K, &mut V)> + ExactSizeIterator + DoubleEndedIterator + FusedIterator
@@ -100,6 +91,12 @@ where
     #[allow(unused)]
     pub fn keys(&self) -> Values<K> {
         K::values()
+    }
+
+    /// Slice split at mut using the key type.
+    #[inline]
+    pub fn split_at_mut(&mut self, key: K) -> (&mut [V], &mut [V]) {
+        self.data.split_at_mut(key.idx())
     }
 }
 
@@ -237,9 +234,17 @@ pub trait FixedSizeIndex {
     fn from_idx(idx: usize) -> Self;
 }
 
+#[derive(Clone, Debug)]
 pub struct Values<I> {
     range: Range<usize>,
     _zone: PhantomData<I>,
+}
+
+impl<I: FixedSizeIndex> Values<I> {
+    /// Gets a copy of the remaining range of indexes.
+    pub fn range(&self) -> Range<usize> {
+        self.range.clone()
+    }
 }
 
 impl<I: FixedSizeIndex> Iterator for Values<I> {
@@ -312,7 +317,7 @@ mod serde {
         K: FixedSizeIndex,
         V: Deserialize<'de>,
     {
-        fn deserialize<D>(deserializer: D) -> Result<IndexMap<K, V>, D::Error>
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,
         {

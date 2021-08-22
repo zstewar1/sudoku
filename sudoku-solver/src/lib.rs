@@ -9,7 +9,8 @@ use log::trace;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use collections::indexed::IncorrectSize;
+pub use collections::indexed::{IncorrectSize, Values};
+pub use collections::availset::AvailSet;
 pub use coordinates::{Col, Coord, Intersect, OutOfRange, Row, Sector, SectorCol, SectorRow, Zone};
 
 use collections::indexed::{FixedSizeIndex, IndexMap};
