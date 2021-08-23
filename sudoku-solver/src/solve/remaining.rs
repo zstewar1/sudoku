@@ -4,6 +4,7 @@ use log::trace;
 
 use crate::collections::availset::{AvailCounter, AvailSet};
 use crate::collections::indexed::IndexMap;
+use crate::trace::Remaining;
 use crate::{Board, Col, Coord, Row, Sector, SectorCol, SectorRow, Zone};
 
 /// Tracks remaining values in a board.
@@ -66,14 +67,22 @@ impl RemainingTracker {
     }
 
     /// Construct a board containing the current state of the solution.
-    pub(crate) fn to_board(&self) -> Board {
-        let mut board = Board::new();
-        for (coord, avail) in self.board.iter() {
-            if let Some(val) = avail.get_single() {
-                board[coord] = Some(val);
-            }
-        }
-        board
+    pub(crate) fn into_board(self) -> Board {
+        self.into_remaining().board()
+    }
+
+    /// Construct a Remaining tracking only the known cell values.
+    /// Note that tracking only the cell values is sufficent to losslessly reconstruct the
+    /// remaining tracker.
+    pub(crate) fn remaining(&self) -> Remaining {
+        self.board.clone().into()
+    }
+
+    /// Construct a Remaining tracking only the known cell values.
+    /// Note that tracking only the cell values is sufficent to losslessly reconstruct the
+    /// remaining tracker.
+    pub(crate) fn into_remaining(self) -> Remaining {
+        self.board.into()
     }
 
     /// Find the first cell with multiple values and return an iterator over copies of
@@ -136,3 +145,9 @@ index!(Col, AvailCounter, cols);
 index!(Sector, AvailCounter, sectors);
 index!(SectorRow, AvailCounter, sector_rows);
 index!(SectorCol, AvailCounter, sector_cols);
+
+impl From<RemainingTracker> for Remaining {
+    fn from(tracker: RemainingTracker) -> Self {
+        tracker.into_remaining()
+    }
+}

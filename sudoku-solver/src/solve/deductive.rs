@@ -4,28 +4,43 @@ use std::collections::VecDeque;
 use log::trace;
 
 use crate::solve::remaining::RemainingTracker;
-use crate::{Col, Coord, Row, Sector, SectorCol, SectorRow, Val, Zone};
+use crate::trace::{DeductionReason, DeductiveTracer, UnsolveableReason};
+use crate::{AvailSet, Col, Coord, Row, Sector, SectorCol, SectorRow, Val, Zone};
 
-pub(crate) fn reduce(remaining: RemainingTracker) -> Option<RemainingTracker> {
-    let mut reducer = DeductiveReducer::new(remaining);
+pub(crate) fn reduce<T>(remaining: RemainingTracker, tracer: &mut T) -> Option<RemainingTracker>
+where
+    T: DeductiveTracer,
+{
+    let mut reducer = DeductiveReducer::new(remaining, tracer);
     reducer.reduce().ok()?;
     Some(reducer.remaining)
 }
 
-struct DeductiveReducer {
+struct DeductiveReducer<'a, T> {
     remaining: RemainingTracker,
     queue: VecDeque<ReduceStep>,
+    tracer: &'a mut T,
 }
 
-impl DeductiveReducer {
+impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
     /// Construct a reducer and enqueue the initial reduction steps.
-    fn new(remaining: RemainingTracker) -> Self {
+    fn new(remaining: RemainingTracker, tracer: &'a mut T) -> Self {
         let queue = build_queue(&remaining);
-        DeductiveReducer { remaining, queue }
+        DeductiveReducer {
+            remaining,
+            queue,
+            tracer,
+        }
+    }
+
+    /// Record the current state of the board with the given reason.
+    fn deduce(&mut self, reason: DeductionReason) {
+        self.tracer.deduce(reason, self.remaining.remaining());
     }
 
     /// Reduce the given board by applying the reduction rules.
     fn reduce(&mut self) -> Result<(), ()> {
+        self.deduce(DeductionReason::InitialState);
         while let Some(next_step) = self.queue.pop_front() {
             match next_step {
                 ReduceStep::CoordSingularized(coord) => self.coord_singularized(coord)?,
@@ -47,11 +62,15 @@ impl DeductiveReducer {
 
     /// Visit a coordinate that has been singularized.
     fn coord_singularized(&mut self, coord: Coord) -> Result<(), ()> {
+        let mut any_eliminated = false;
         // Note: if a different step eliminates the last number from this cell, we have to
         // stop before we get here again.
         let val = self.remaining[coord].get_single().unwrap();
         for neighbor in coord.neighbors() {
-            self.eliminate(neighbor, val)?;
+            any_eliminated |= self.eliminate(neighbor, val)?;
+        }
+        if any_eliminated {
+            self.deduce(DeductionReason::CoordNeighbors { pos: coord, val });
         }
         Ok(())
     }
@@ -73,7 +92,10 @@ impl DeductiveReducer {
                 }
             })
             .unwrap();
-        self.eliminate_all(coord, other_vals)
+        if !self.eliminate_all(coord, other_vals)?.is_empty() {
+            self.deduce(DeductionReason::UniqueInRow { pos: coord, val });
+        }
+        Ok(())
     }
 
     /// Visit a col which now has only one cell left for some value.
@@ -93,7 +115,10 @@ impl DeductiveReducer {
                 }
             })
             .unwrap();
-        self.eliminate_all(coord, other_vals)
+        if !self.eliminate_all(coord, other_vals)?.is_empty() {
+            self.deduce(DeductionReason::UniqueInCol { pos: coord, val });
+        }
+        Ok(())
     }
 
     /// Visit a sector which now has only one cell left for some value.
@@ -113,27 +138,44 @@ impl DeductiveReducer {
                 }
             })
             .unwrap();
-        self.eliminate_all(coord, other_vals)
+        if !self.eliminate_all(coord, other_vals)?.is_empty() {
+            self.deduce(DeductionReason::UniqueInSector { pos: coord, val });
+        }
+        Ok(())
     }
 
     /// Eliminates all values in this sector-row from the rest of the row and sector.
     fn secrow_tripleized(&mut self, secrow: SectorRow) -> Result<(), ()> {
+        let mut eliminated = AvailSet::none();
         let values = self.remaining[secrow].avail();
         // If this fails we became unsolveable but didn't stop.
         debug_assert!(values.len() == SectorRow::SIZE);
         for neighbor in secrow.neighbors() {
-            self.eliminate_all(neighbor, values)?;
+            eliminated |= self.eliminate_all(neighbor, values)?;
+        }
+        if !eliminated.is_empty() {
+            self.deduce(DeductionReason::SecOnlyRow {
+                pos: secrow,
+                vals: eliminated,
+            });
         }
         Ok(())
     }
 
     /// Eliminates all values in this sector-col from the rest of the col and sector.
     fn seccol_tripleized(&mut self, seccol: SectorCol) -> Result<(), ()> {
+        let mut eliminated = AvailSet::none();
         let values = self.remaining[seccol].avail();
         // If this fails we became unsolveable but didn't stop.
         debug_assert!(values.len() == SectorCol::SIZE);
         for neighbor in seccol.neighbors() {
-            self.eliminate_all(neighbor, values)?;
+            eliminated |= self.eliminate_all(neighbor, values)?;
+        }
+        if !eliminated.is_empty() {
+            self.deduce(DeductionReason::SecOnlyCol {
+                pos: seccol,
+                vals: eliminated,
+            });
         }
         Ok(())
     }
@@ -143,15 +185,23 @@ impl DeductiveReducer {
         // Visit all sector-row neighbors of the affected sector-row.
         for neighbor in secrow.neighbors() {
             if self.remaining[neighbor][val] == self.remaining[neighbor.row()][val] {
+                let mut eliminated = AvailSet::none();
                 // If the neighbor is the last one in its row containing the
                 // given value, eliminate the value from the rest of the
                 // neighbor's sector.
                 for sec_secrow in neighbor.sector().rows() {
                     if sec_secrow != neighbor {
-                        self.eliminate_all(sec_secrow, Some(val))?;
+                        eliminated |= self.eliminate_all(sec_secrow, Some(val))?;
                     }
                 }
+                if !eliminated.is_empty() {
+                    self.deduce(DeductionReason::RowOnlySec {
+                        pos: neighbor,
+                        val: val,
+                    });
+                }
             } else if self.remaining[neighbor][val] == self.remaining[neighbor.sector()][val] {
+                let mut eliminated = AvailSet::none();
                 // Mutually exclusive with above, because if we hit above, we
                 // already eliminated the value from the rest of the sector.
                 //
@@ -160,8 +210,14 @@ impl DeductiveReducer {
                 // neighbor's row.
                 for row_secrow in neighbor.row().sector_rows() {
                     if row_secrow != neighbor {
-                        self.eliminate_all(row_secrow, Some(val))?;
+                        eliminated |= self.eliminate_all(row_secrow, Some(val))?;
                     }
+                }
+                if !eliminated.is_empty() {
+                    self.deduce(DeductionReason::SecOnlyRow {
+                        pos: neighbor,
+                        vals: AvailSet::only(val),
+                    });
                 }
             }
         }
@@ -173,15 +229,23 @@ impl DeductiveReducer {
         // Visit all sector-col neighbors of the affected sector-col.
         for neighbor in seccol.neighbors() {
             if self.remaining[neighbor][val] == self.remaining[neighbor.col()][val] {
+                let mut eliminated = AvailSet::none();
                 // If the neighbor is the last one in its col containing the
                 // given value, eliminate the value from the rest of the
                 // neighbor's sector.
                 for sec_seccol in neighbor.sector().cols() {
                     if sec_seccol != neighbor {
-                        self.eliminate_all(sec_seccol, Some(val))?;
+                        eliminated |= self.eliminate_all(sec_seccol, Some(val))?;
                     }
                 }
+                if !eliminated.is_empty() {
+                    self.deduce(DeductionReason::ColOnlySec {
+                        pos: neighbor,
+                        val: val,
+                    });
+                }
             } else if self.remaining[neighbor][val] == self.remaining[neighbor.sector()][val] {
+                let mut eliminated = AvailSet::none();
                 // Mutually exclusive with above, because if we hit above, we
                 // already eliminated the value from the rest of the sector.
                 //
@@ -190,8 +254,14 @@ impl DeductiveReducer {
                 // neighbor's row.
                 for col_seccol in neighbor.col().sector_cols() {
                     if col_seccol != neighbor {
-                        self.eliminate_all(col_seccol, Some(val))?;
+                        eliminated |= self.eliminate_all(col_seccol, Some(val))?;
                     }
+                }
+                if !eliminated.is_empty() {
+                    self.deduce(DeductionReason::SecOnlyCol {
+                        pos: neighbor,
+                        vals: eliminated,
+                    });
                 }
             }
         }
@@ -200,30 +270,36 @@ impl DeductiveReducer {
 
     /// Convenience function to eliminate all values in the given AvailSet from all coords
     /// in the given zone.
+    /// Returns true if any values were eliminated.
     fn eliminate_all(
         &mut self,
         zone: impl IntoIterator<Item = Coord>,
         vals: impl IntoIterator<Item = Val> + Copy,
-    ) -> Result<(), ()> {
+    ) -> Result<AvailSet, ()> {
+        let mut eliminated = AvailSet::none();
         for coord in zone {
             for val in vals {
-                self.eliminate(coord, val)?;
+                if self.eliminate(coord, val)? {
+                    eliminated |= val;
+                }
             }
         }
-        Ok(())
+        Ok(eliminated)
     }
 
     /// Eliminate the given value from a single cell, pushing new reduce steps for the
     /// effects on the row, column, an sector.
-    fn eliminate(&mut self, coord: Coord, val: Val) -> Result<(), ()> {
+    fn eliminate(&mut self, coord: Coord, val: Val) -> Result<bool, ()> {
         if self.eliminate_from_cell(coord, val)? {
             self.eliminate_from_row(coord.row(), val)?;
             self.eliminate_from_col(coord.col(), val)?;
             self.eliminate_from_sec(coord.sector(), val)?;
             self.eliminate_from_secrow(coord.sector_row(), val)?;
             self.eliminate_from_seccol(coord.sector_col(), val)?;
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        Ok(())
     }
 
     /// Eliminate a single value only from the board remaining set. Return true
@@ -235,6 +311,9 @@ impl DeductiveReducer {
         if cell.remove(val) {
             // Last value eliminated from the cell.
             if cell.is_empty() {
+                self.deduce(DeductionReason::Unsolveable(UnsolveableReason::Empty(
+                    coord,
+                )));
                 trace!(
                     "Stopped deductive because a {:?} had no remaining values",
                     coord

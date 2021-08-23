@@ -6,6 +6,7 @@ use crate::{FixedSizeIndex, Val, Values};
 
 /// Set of available numbers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[repr(transparent)]
 pub struct AvailSet(u16);
 
 impl AvailSet {
@@ -76,6 +77,15 @@ impl AvailSet {
         self.0.count_ones() as usize
     }
 
+    /// Remove any value that don't match the given function.
+    pub fn retain(&mut self, mut f: impl FnMut(Val) -> bool) {
+        for val in self.iter() {
+            if !f(val) {
+                *self -= val;
+            }
+        }
+    }
+
     /// Convert a single value to a bitmask.
     fn to_mask(val: Val) -> u16 {
         1 << val.idx()
@@ -85,13 +95,6 @@ impl AvailSet {
     /// because it isn't necessary to keep a borrow for the iterator to work.
     pub fn iter(self) -> AvailSetIter {
         self.into_iter()
-    }
-}
-
-impl Default for AvailSet {
-    #[inline]
-    fn default() -> Self {
-        AvailSet::none()
     }
 }
 
@@ -135,6 +138,40 @@ impl Not for AvailSet {
     fn not(self) -> Self::Output {
         // Bit invert the contents and then mask back to All.
         AvailSet((!self.0) & AvailSet::all().0)
+    }
+}
+
+impl BitOr for AvailSet {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(mut self, rhs: Self) -> Self::Output {
+        self |= rhs;
+        self
+    }
+}
+
+impl BitOrAssign for AvailSet {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl Sub for AvailSet {
+    type Output = Self;
+
+    #[inline]
+    fn sub(mut self, rhs: Self) -> Self::Output {
+        self -= rhs;
+        self
+    }
+}
+
+impl SubAssign for AvailSet {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 &= !rhs.0;
     }
 }
 
@@ -410,6 +447,8 @@ mod serde {
     use serde::ser::SerializeSeq;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+    use crate::Val;
+
     use super::AvailSet;
 
     impl Serialize for AvailSet {
@@ -439,7 +478,7 @@ mod serde {
 
         fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
             let mut set = AvailSet::none();
-            while let Some(next) = seq.next_element()? {
+            while let Some(next) = seq.next_element::<Val>()? {
                 set |= next;
             }
             Ok(set)

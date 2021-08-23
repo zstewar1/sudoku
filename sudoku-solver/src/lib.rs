@@ -9,8 +9,8 @@ use log::trace;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use collections::indexed::{IncorrectSize, Values};
 pub use collections::availset::AvailSet;
+pub use collections::indexed::{IncorrectSize, Values};
 pub use coordinates::{Col, Coord, Intersect, OutOfRange, Row, Sector, SectorCol, SectorRow, Zone};
 
 use collections::indexed::{FixedSizeIndex, IndexMap};
@@ -20,6 +20,7 @@ mod collections;
 #[macro_use]
 mod coordinates;
 mod solve;
+pub mod trace;
 
 /// A Sudoku Board value.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord)]
@@ -117,7 +118,7 @@ macro_rules! val_fromint {
 val_fromint!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize, isize);
 
 /// Sudoku board, with some values optionally specified.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(transparent))]
 pub struct Board(IndexMap<Coord, Option<Val>>);
@@ -137,12 +138,13 @@ impl Board {
         let mut stack = vec![(0, RemainingTracker::new(self))];
         while let Some((depth, next)) = stack.pop() {
             trace!("Trying board at depth {}", depth);
+            let mut tracer = trace::NopDeductiveTracer;
             // Apply deductive rules to eliminate what we can and stop this stack-branch
             // if the board is unsolveable.
-            if let Some(reduced) = solve::deductive::reduce(next) {
+            if let Some(reduced) = solve::deductive::reduce(next, &mut tracer) {
                 if reduced.is_solved() {
                     trace!("Board solved");
-                    return Some(reduced.to_board());
+                    return Some(reduced.into_board());
                 } else {
                     trace!("Board reduced but not yet solved.");
                     let len = stack.len();
@@ -227,12 +229,6 @@ impl Board {
     }
 }
 
-impl Default for Board {
-    fn default() -> Self {
-        Board(IndexMap::new())
-    }
-}
-
 impl AsRef<[Option<Val>]> for Board {
     fn as_ref(&self) -> &[Option<Val>] {
         self.row_major()
@@ -286,6 +282,18 @@ impl From<Board> for Box<[Option<Val>]> {
     #[inline]
     fn from(board: Board) -> Self {
         board.0.into()
+    }
+}
+
+impl From<Board> for IndexMap<Coord, Option<Val>> {
+    fn from(board: Board) -> Self {
+        board.0
+    }
+}
+
+impl From<IndexMap<Coord, Option<Val>>> for Board {
+    fn from(vals: IndexMap<Coord, Option<Val>>) -> Self {
+        Self(vals)
     }
 }
 

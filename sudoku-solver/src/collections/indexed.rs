@@ -37,6 +37,14 @@ where
     }
 }
 
+impl<K, V> Default for IndexMap<K, V> 
+where
+    K: FixedSizeIndex,
+    V: Default,
+{
+    fn default() -> Self { Self::new() }
+}
+
 impl<K, V> IndexMap<K, V>
 where
     K: FixedSizeIndex,
