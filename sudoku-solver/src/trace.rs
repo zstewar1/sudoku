@@ -145,38 +145,22 @@ pub enum UnsolveableReason {
     Empty { pos: Coord },
     /// In the given row the given values each only had one cell left and it was
     /// the same cell for both.
-    RowValsMustShare {
-        pos: Row, 
-        vals: AvailSet
-    },
+    RowValsMustShare { pos: Row, vals: AvailSet },
     /// In the given col the given values each only had one cell left and it was
     /// the same cell for both.
-    ColValsMustShare {
-        pos: Col, 
-        vals: AvailSet
-    },
+    ColValsMustShare { pos: Col, vals: AvailSet },
     /// In the given sector the given values each only had one cell left and it
     /// was the same cell for both.
-    SecValsMustShare {
-        pos: Sector, 
-        vals: AvailSet
-    },
+    SecValsMustShare { pos: Sector, vals: AvailSet },
     /// The last possible position for the given val was eliminated from the row.
-    RowMissingVal {
-        pos: Row,
-        val: Val,
-    },
+    RowMissingVal { pos: Row, val: Val },
     /// The last possible position for the given val was eliminated from the col.
-    ColMissingVal {
-        pos: Col,
-        val: Val,
-    },
+    ColMissingVal { pos: Col, val: Val },
     /// The last possible position for the given val was eliminated from the
     /// sector.
-    SecMissingVal {
-        pos: Sector,
-        val: Val,
-    },
-    SecRowTooFewVals { pos: SectorRow, },
-    SecColTooFewVals { pos: SectorCol, },
+    SecMissingVal { pos: Sector, val: Val },
+    /// Too many values were eliminated from the sector-row.
+    SecRowTooFewVals { pos: SectorRow },
+    /// Too many values were eliminated from the sector-col.
+    SecColTooFewVals { pos: SectorCol },
 }

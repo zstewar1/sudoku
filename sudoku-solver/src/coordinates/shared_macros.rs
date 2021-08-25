@@ -53,5 +53,5 @@ macro_rules! assert_sorted {
         let mut sorted = $v.clone();
         sorted.sort();
         assert_eq!($v, sorted);
-    }
+    };
 }

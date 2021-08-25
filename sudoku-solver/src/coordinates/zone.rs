@@ -7,7 +7,15 @@ use crate::{Coord, Values};
 /// A zone of the board is an area that must uniquely contain all numbers 1-9.
 /// This is an abstraction over row, column, and sector.
 pub trait Zone:
-    FixedSizeIndex + FixedSizeIndexable<Item = Coord> + ZoneContaining + PartialEq + Eq + Hash + Copy + Clone + IntoIterator<Item = Coord>
+    FixedSizeIndex
+    + FixedSizeIndexable<Item = Coord>
+    + ZoneContaining
+    + PartialEq
+    + Eq
+    + Hash
+    + Copy
+    + Clone
+    + IntoIterator<Item = Coord>
 {
     const SIZE: usize = Self::NUM_ITEMS;
 

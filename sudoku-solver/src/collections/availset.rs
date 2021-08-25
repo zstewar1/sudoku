@@ -1,6 +1,8 @@
-use std::iter::FusedIterator;
 use std::fmt::{self, Write};
-use std::ops::{Add, AddAssign, BitOr, BitOrAssign, BitAnd, BitAndAssign, Index, IndexMut, Not, Sub, SubAssign};
+use std::iter::FusedIterator;
+use std::ops::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, Index, IndexMut, Not, Sub, SubAssign,
+};
 
 use crate::collections::indexed::IndexMap;
 use crate::{FixedSizeIndex, Val, Values};
@@ -522,7 +524,7 @@ mod serde {
     impl<'de> Deserialize<'de> for AvailSet {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             deserializer.deserialize_seq(AvailSetVisitor)
-        } 
+        }
     }
 
     struct AvailSetVisitor;

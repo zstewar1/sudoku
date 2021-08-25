@@ -650,10 +650,16 @@ fn build_secrow_seccol_queue<Z: SecRowSecCol>(rem: &RemainingTracker, queue: &mu
         if avail.avail().len() == Z::SIZE {
             queue.push(srsc.visit_size_match());
         }
-        if avail.counts().any(|(val, &count)| count == srsc.line().remaining(rem)[val]) {
+        if avail
+            .counts()
+            .any(|(val, &count)| count == srsc.line().remaining(rem)[val])
+        {
             queue.push(srsc.visit_only_in_line());
         }
-        if avail.counts().any(|(val, &count)| count == rem[srsc.sector()][val]) {
+        if avail
+            .counts()
+            .any(|(val, &count)| count == rem[srsc.sector()][val])
+        {
             queue.push(srsc.visit_only_in_sec());
         }
     }
