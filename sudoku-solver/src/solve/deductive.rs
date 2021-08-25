@@ -42,6 +42,14 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
         self.tracer.deduce(reason, self.remaining.remaining());
     }
 
+    /// Record the current state of the board with the given reason.
+    fn fail(&mut self, reason: UnsolveableReason) {
+        self.tracer.deduce(
+            DeductionReason::Unsolveable(reason),
+            self.remaining.remaining(),
+        );
+    }
+
     /// Reduce the given board by applying the reduction rules.
     fn reduce(&mut self) -> Result<(), ()> {
         self.deduce(DeductionReason::InitialState);
@@ -100,6 +108,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
                         matches,
                         coord,
                     );
+                    self.fail(rcs.fail_must_share(matches));
                     return Err(());
                 }
                 let others = rem - singles;
@@ -211,13 +220,11 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
         if cell.remove(val) {
             // Last value eliminated from the cell.
             if cell.is_empty() {
-                self.deduce(DeductionReason::Unsolveable(UnsolveableReason::Empty(
-                    coord,
-                )));
                 trace!(
                     "Stopped deductive because a {:?} had no remaining values",
                     coord
                 );
+                self.fail(UnsolveableReason::Empty { pos: coord });
                 return Err(());
             }
             if cell.is_single() {
@@ -239,6 +246,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
                     rcs,
                     val
                 );
+                self.fail(rcs.fail_missing_val(val));
                 return Err(());
             }
             Some(1) => self.queue.push(rcs.visit()),
@@ -266,6 +274,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
                     srsc,
                     Z::SIZE,
                 );
+                self.fail(srsc.fail_too_few_vals());
                 return Err(());
             } else if num_avail == Z::SIZE {
                 self.queue.push(srsc.visit_size_match());
@@ -307,6 +316,10 @@ trait RowColSec: Zone + fmt::Debug + Copy {
 
     /// Build the DeductionReason for this.
     fn deduced(self, vals: AvailSet) -> DeductionReason;
+    /// Vals must share a cell in this.
+    fn fail_must_share(self, vals: AvailSet) -> UnsolveableReason;
+    /// The last copy of the given value was eliminated from the row/col/sec.
+    fn fail_missing_val(self, val: Val) -> UnsolveableReason;
 }
 
 impl RowColSec for Row {
@@ -324,6 +337,12 @@ impl RowColSec for Row {
     }
     fn deduced(self, vals: AvailSet) -> DeductionReason {
         DeductionReason::UniqueInRow { pos: self, vals }
+    }
+    fn fail_must_share(self, vals: AvailSet) -> UnsolveableReason {
+        UnsolveableReason::RowValsMustShare { pos: self, vals }
+    }
+    fn fail_missing_val(self, val: Val) -> UnsolveableReason {
+        UnsolveableReason::RowMissingVal { pos: self, val }
     }
 }
 
@@ -343,6 +362,12 @@ impl RowColSec for Col {
     fn deduced(self, vals: AvailSet) -> DeductionReason {
         DeductionReason::UniqueInCol { pos: self, vals }
     }
+    fn fail_must_share(self, vals: AvailSet) -> UnsolveableReason {
+        UnsolveableReason::ColValsMustShare { pos: self, vals }
+    }
+    fn fail_missing_val(self, val: Val) -> UnsolveableReason {
+        UnsolveableReason::ColMissingVal { pos: self, val }
+    }
 }
 
 impl RowColSec for Sector {
@@ -361,10 +386,20 @@ impl RowColSec for Sector {
     fn deduced(self, vals: AvailSet) -> DeductionReason {
         DeductionReason::UniqueInSector { pos: self, vals }
     }
+    fn fail_must_share(self, vals: AvailSet) -> UnsolveableReason {
+        UnsolveableReason::SecValsMustShare { pos: self, vals }
+    }
+    fn fail_missing_val(self, val: Val) -> UnsolveableReason {
+        UnsolveableReason::SecMissingVal { pos: self, val }
+    }
 }
 
 /// Helper trait for generalizing row-sector and col-sector.
 trait SecRowSecCol: Zone + fmt::Debug + Copy {
+    /// Get the map of all remaining for this sector-row/sector-col.
+    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter>
+    where
+        Self: Sized;
     /// Get the remaining count at the current sector-row/sector-col.
     fn remaining(self, rem: &RemainingTracker) -> &AvailCounter;
     /// Get the mutable remaining count at the current sector-row/sector-col.
@@ -405,9 +440,14 @@ trait SecRowSecCol: Zone + fmt::Debug + Copy {
     /// Eliminated the given values based on this sector-row/sector-col being the
     /// only one in the sector that could hold the given values.
     fn deduced_only_in_sec(self, vals: AvailSet) -> DeductionReason;
+    /// There are too few values left in the sector-row/sector-col to fill it.
+    fn fail_too_few_vals(self) -> UnsolveableReason;
 }
 
 impl SecRowSecCol for SectorRow {
+    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
+        &rem.sector_rows
+    }
     fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
         &rem[self]
     }
@@ -445,9 +485,15 @@ impl SecRowSecCol for SectorRow {
     fn deduced_only_in_sec(self, vals: AvailSet) -> DeductionReason {
         DeductionReason::SecOnlyRow { pos: self, vals }
     }
+    fn fail_too_few_vals(self) -> UnsolveableReason {
+        UnsolveableReason::SecRowTooFewVals { pos: self }
+    }
 }
 
 impl SecRowSecCol for SectorCol {
+    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
+        &rem.sector_cols
+    }
     fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
         &rem[self]
     }
@@ -484,6 +530,9 @@ impl SecRowSecCol for SectorCol {
     }
     fn deduced_only_in_sec(self, vals: AvailSet) -> DeductionReason {
         DeductionReason::SecOnlyCol { pos: self, vals }
+    }
+    fn fail_too_few_vals(self) -> UnsolveableReason {
+        UnsolveableReason::SecColTooFewVals { pos: self }
     }
 }
 
@@ -580,40 +629,8 @@ fn build_queue(remaining: &RemainingTracker) -> ReduceQueue {
     build_row_col_sec_queue::<Row>(remaining, &mut queue);
     build_row_col_sec_queue::<Col>(remaining, &mut queue);
     build_row_col_sec_queue::<Sector>(remaining, &mut queue);
-    for (secrow, avail) in remaining.sector_rows.iter() {
-        if avail.avail().len() == SectorRow::SIZE {
-            queue.push(ReduceStep::SecRowTripleized(secrow));
-        }
-        if avail
-            .counts()
-            .any(|(val, &count)| count == remaining[secrow.row()][val])
-        {
-            queue.push(ReduceStep::RowOnlySec(secrow));
-        }
-        if avail
-            .counts()
-            .any(|(val, &count)| count == remaining[secrow.sector()][val])
-        {
-            queue.push(ReduceStep::SecOnlyRow(secrow));
-        }
-    }
-    for (seccol, avail) in remaining.sector_cols.iter() {
-        if avail.avail().len() == SectorCol::SIZE {
-            queue.push(ReduceStep::SecColTripleized(seccol));
-        }
-        if avail
-            .counts()
-            .any(|(val, &count)| count == remaining[seccol.col()][val])
-        {
-            queue.push(ReduceStep::ColOnlySec(seccol));
-        }
-        if avail
-            .counts()
-            .any(|(val, &count)| count == remaining[seccol.sector()][val])
-        {
-            queue.push(ReduceStep::SecOnlyCol(seccol));
-        }
-    }
+    build_secrow_seccol_queue::<SectorRow>(remaining, &mut queue);
+    build_secrow_seccol_queue::<SectorCol>(remaining, &mut queue);
     queue
 }
 
@@ -623,6 +640,21 @@ fn build_row_col_sec_queue<Z: RowColSec>(rem: &RemainingTracker, queue: &mut Red
     for (rcs, avail) in Z::all_remaining(rem).iter() {
         if avail.counts().any(|(_, &count)| count == 1) {
             queue.push(rcs.visit());
+        }
+    }
+}
+
+/// Adds entries to visit any sector-row/sector-col that already reductions available.
+fn build_secrow_seccol_queue<Z: SecRowSecCol>(rem: &RemainingTracker, queue: &mut ReduceQueue) {
+    for (srsc, avail) in Z::all_remaining(rem).iter() {
+        if avail.avail().len() == Z::SIZE {
+            queue.push(srsc.visit_size_match());
+        }
+        if avail.counts().any(|(val, &count)| count == srsc.line().remaining(rem)[val]) {
+            queue.push(srsc.visit_only_in_line());
+        }
+        if avail.counts().any(|(val, &count)| count == rem[srsc.sector()][val]) {
+            queue.push(srsc.visit_only_in_sec());
         }
     }
 }
