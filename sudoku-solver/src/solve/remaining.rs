@@ -3,19 +3,19 @@ use std::ops::{Index, IndexMut};
 use log::trace;
 
 use crate::collections::availset::{AvailCounter, AvailSet};
-use crate::collections::indexed::IndexMap;
+use crate::collections::indexed::{FixedSizeIndex, IndexMap};
 use crate::trace::Remaining;
 use crate::{Board, Col, Coord, Row, Sector, SectorCol, SectorRow, Zone};
 
 /// Tracks remaining values in a board.
 #[derive(Clone, Debug)]
 pub(crate) struct RemainingTracker {
-    pub(super) board: IndexMap<Coord, AvailSet>,
-    pub(super) rows: IndexMap<Row, AvailCounter>,
-    pub(super) cols: IndexMap<Col, AvailCounter>,
-    pub(super) sectors: IndexMap<Sector, AvailCounter>,
-    pub(super) sector_rows: IndexMap<SectorRow, AvailCounter>,
-    pub(super) sector_cols: IndexMap<SectorCol, AvailCounter>,
+    board: IndexMap<Coord, AvailSet>,
+    rows: IndexMap<Row, AvailCounter>,
+    cols: IndexMap<Col, AvailCounter>,
+    sectors: IndexMap<Sector, AvailCounter>,
+    sector_rows: IndexMap<SectorRow, AvailCounter>,
+    sector_cols: IndexMap<SectorCol, AvailCounter>,
 }
 
 impl RemainingTracker {
@@ -40,6 +40,16 @@ impl RemainingTracker {
             }
         }
         tracker
+    }
+
+    /// Get the mapping for this type from the tracker.
+    pub(crate) fn get<T: ExtractRem>(&self) -> &IndexMap<T, T::Avail> {
+        T::get(self)
+    }
+
+    /// Get a mutable reference to the mapping for this type from the tracker.
+    pub(crate) fn get_mut<T: ExtractRem>(&mut self) -> &mut IndexMap<T, T::Avail> {
+        T::get_mut(self)
     }
 
     // Return true if the board is known to be unsolveable from its current state.
@@ -121,30 +131,55 @@ fn is_solved_zone(avail: &AvailCounter) -> bool {
     avail.counts().all(|(_, &cnt)| cnt == 1)
 }
 
-macro_rules! index {
-    ($idx:ty, $out:ty, $field:ident) => {
-        impl Index<$idx> for RemainingTracker {
-            type Output = $out;
+/// Trait for getting a type from the remaining tracker.
+pub(crate) trait ExtractRem: FixedSizeIndex + 'static {
+    type Avail;
 
-            fn index(&self, idx: $idx) -> &Self::Output {
-                &self.$field[idx]
+    fn get(rem: &RemainingTracker) -> &IndexMap<Self, Self::Avail>
+    where
+        Self: Sized;
+
+    fn get_mut(rem: &mut RemainingTracker) -> &mut IndexMap<Self, Self::Avail>
+    where
+        Self: Sized;
+}
+
+macro_rules! extract {
+    ($t:ty, $out:ty, $field:ident) => {
+        impl ExtractRem for $t {
+            type Avail = $out;
+
+            fn get(rem: &RemainingTracker) -> &IndexMap<Self, Self::Avail> {
+                &rem.$field
             }
-        }
 
-        impl IndexMut<$idx> for RemainingTracker {
-            fn index_mut(&mut self, idx: $idx) -> &mut Self::Output {
-                &mut self.$field[idx]
+            fn get_mut(rem: &mut RemainingTracker) -> &mut IndexMap<Self, Self::Avail> {
+                &mut rem.$field
             }
         }
     };
 }
 
-index!(Coord, AvailSet, board);
-index!(Row, AvailCounter, rows);
-index!(Col, AvailCounter, cols);
-index!(Sector, AvailCounter, sectors);
-index!(SectorRow, AvailCounter, sector_rows);
-index!(SectorCol, AvailCounter, sector_cols);
+extract!(Coord, AvailSet, board);
+extract!(Row, AvailCounter, rows);
+extract!(Col, AvailCounter, cols);
+extract!(Sector, AvailCounter, sectors);
+extract!(SectorRow, AvailCounter, sector_rows);
+extract!(SectorCol, AvailCounter, sector_cols);
+
+impl<T: ExtractRem> Index<T> for RemainingTracker {
+    type Output = T::Avail;
+
+    fn index(&self, idx: T) -> &Self::Output {
+        &self.get::<T>()[idx]
+    }
+}
+
+impl<T: ExtractRem> IndexMut<T> for RemainingTracker {
+    fn index_mut(&mut self, idx: T) -> &mut Self::Output {
+        &mut self.get_mut::<T>()[idx]
+    }
+}
 
 impl From<RemainingTracker> for Remaining {
     fn from(tracker: RemainingTracker) -> Self {

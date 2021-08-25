@@ -6,10 +6,11 @@ use std::{array, fmt};
 use log::trace;
 
 use crate::collections::availset::AvailCounter;
-use crate::collections::indexed::IndexMap;
 use crate::solve::remaining::RemainingTracker;
 use crate::trace::{DeductionReason, DeductiveTracer, UnsolveableReason};
 use crate::{AvailSet, Col, Coord, Row, Sector, SectorCol, SectorRow, Val, Zone};
+
+use super::remaining::ExtractRem;
 
 pub(crate) fn reduce<T>(remaining: RemainingTracker, tracer: &mut T) -> Option<RemainingTracker>
 where
@@ -87,7 +88,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
 
     /// Visit a row which now has only one cell left for some value.
     fn rcs_vals_singularized<Z: RowColSec>(&mut self, rcs: Z) -> Result<(), ()> {
-        let singles = rcs.remaining(&self.remaining).counts().fold(
+        let singles = self.remaining[rcs].counts().fold(
             AvailSet::none(),
             |mut singles, (val, &count)| {
                 if count == 1 {
@@ -125,7 +126,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
 
     /// Eliminates all values in this sector-row from the rest of the row and sector.
     fn secrow_seccol_tripleized<Z: SecRowSecCol>(&mut self, srsc: Z) -> Result<(), ()> {
-        let values = srsc.remaining(&self.remaining).avail();
+        let values = self.remaining[srsc].avail();
         // If this fails we became unsolveable but didn't stop.
         debug_assert!(values.len() == Z::SIZE);
         let eliminated = self.eliminate_all(
@@ -141,10 +142,10 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
     /// Eliminates values in this sector-row/sector-col which have the same count
     /// as the row/col from the rest of the sector.
     fn secrow_seccol_only_in_line<Z: SecRowSecCol>(&mut self, srsc: Z) -> Result<(), ()> {
-        let uniques = srsc.remaining(&self.remaining).counts().fold(
+        let uniques = self.remaining[srsc].counts().fold(
             AvailSet::none(),
             |mut uniques, (val, &count)| {
-                if count == srsc.line().remaining(&self.remaining)[val] {
+                if count == self.remaining[srsc.line()][val] {
                     uniques |= val;
                 }
                 uniques
@@ -160,7 +161,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
     /// Eliminates values in this sector-row/sector-col which have the same count
     /// as the sector from the rest of the row/col.
     fn secrow_seccol_only_in_sec<Z: SecRowSecCol>(&mut self, srsc: Z) -> Result<(), ()> {
-        let uniques = srsc.remaining(&self.remaining).counts().fold(
+        let uniques = self.remaining[srsc].counts().fold(
             AvailSet::none(),
             |mut uniques, (val, &count)| {
                 if count == self.remaining[srsc.sector()][val] {
@@ -238,7 +239,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
 
     /// Eliminate a value from a row, pushing a row singularization if needed.
     fn eliminate_from_rcs<Z: RowColSec>(&mut self, rcs: Z, val: Val) -> Result<(), ()> {
-        match rcs.remaining_mut(&mut self.remaining).remove(val) {
+        match self.remaining[rcs].remove(val) {
             // Last copy of that value eliminated from the row.
             Some(0) => {
                 trace!(
@@ -263,7 +264,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
         srsc: Z,
         val: Val,
     ) -> Result<(), ()> {
-        let cell = srsc.remaining_mut(&mut self.remaining);
+        let cell = &mut self.remaining[srsc];
         if let Some(0) = cell.remove(val) {
             // Just eliminated the last of some number from this sector-row, so check if
             // the number of remaining values is equal to or less than the size.
@@ -280,17 +281,13 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
                 self.queue.push(srsc.visit_size_match());
             }
             for neighbor in srsc.line_neighbors() {
-                if neighbor.remaining(&self.remaining)[val]
-                    == neighbor.line().remaining(&self.remaining)[val]
-                {
+                if self.remaining[neighbor][val] == self.remaining[neighbor.line()][val] {
                     self.queue.push(neighbor.visit_only_in_line());
                     break;
                 }
             }
             for neighbor in srsc.sec_neighbors() {
-                if neighbor.remaining(&self.remaining)[val]
-                    == self.remaining[neighbor.sector()][val]
-                {
+                if self.remaining[neighbor][val] == self.remaining[neighbor.sector()][val] {
                     self.queue.push(neighbor.visit_only_in_sec());
                     break;
                 }
@@ -301,16 +298,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
 }
 
 /// Helper for generalizing row/col/sector.
-trait RowColSec: Zone + fmt::Debug + Copy {
-    /// Get the map of all remaining for this row/col/sector.
-    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter>
-    where
-        Self: Sized;
-    /// Get the remaining count at the current row/col/sector.
-    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter;
-    /// Get the mutable remaining count at the current row/col/sector.
-    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter;
-
+trait RowColSec: Zone + fmt::Debug + Copy + ExtractRem<Avail = AvailCounter> {
     /// Build a reduce step to visit this.
     fn visit(self) -> ReduceStep;
 
@@ -323,15 +311,6 @@ trait RowColSec: Zone + fmt::Debug + Copy {
 }
 
 impl RowColSec for Row {
-    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
-        &rem.rows
-    }
-    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
-        &rem[self]
-    }
-    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
-        &mut rem[self]
-    }
     fn visit(self) -> ReduceStep {
         ReduceStep::RowValsSingularized(self)
     }
@@ -347,15 +326,6 @@ impl RowColSec for Row {
 }
 
 impl RowColSec for Col {
-    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
-        &rem.cols
-    }
-    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
-        &rem[self]
-    }
-    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
-        &mut rem[self]
-    }
     fn visit(self) -> ReduceStep {
         ReduceStep::ColValsSingularized(self)
     }
@@ -371,15 +341,6 @@ impl RowColSec for Col {
 }
 
 impl RowColSec for Sector {
-    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
-        &rem.sectors
-    }
-    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
-        &rem[self]
-    }
-    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
-        &mut rem[self]
-    }
     fn visit(self) -> ReduceStep {
         ReduceStep::SecValsSingularized(self)
     }
@@ -395,21 +356,13 @@ impl RowColSec for Sector {
 }
 
 /// Helper trait for generalizing row-sector and col-sector.
-trait SecRowSecCol: Zone + fmt::Debug + Copy {
-    /// Get the map of all remaining for this sector-row/sector-col.
-    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter>
-    where
-        Self: Sized;
-    /// Get the remaining count at the current sector-row/sector-col.
-    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter;
-    /// Get the mutable remaining count at the current sector-row/sector-col.
-    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter;
+trait SecRowSecCol: Zone + fmt::Debug + Copy + ExtractRem<Avail = AvailCounter> {
     /// Build a reduce step to visit this when the number of remaining values
     /// matches the SIZE.
     fn visit_size_match(self) -> ReduceStep;
 
     /// Type of the linear direction.
-    type Line: RowColSec;
+    type Line: ExtractRem<Avail = AvailCounter>;
     /// Gets the line this is a part of.
     fn line(self) -> Self::Line;
     /// Get an iterator over neighbors in the same row/col as self.
@@ -445,15 +398,6 @@ trait SecRowSecCol: Zone + fmt::Debug + Copy {
 }
 
 impl SecRowSecCol for SectorRow {
-    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
-        &rem.sector_rows
-    }
-    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
-        &rem[self]
-    }
-    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
-        &mut rem[self]
-    }
     fn visit_size_match(self) -> ReduceStep {
         ReduceStep::SecRowTripleized(self)
     }
@@ -491,15 +435,6 @@ impl SecRowSecCol for SectorRow {
 }
 
 impl SecRowSecCol for SectorCol {
-    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
-        &rem.sector_cols
-    }
-    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
-        &rem[self]
-    }
-    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
-        &mut rem[self]
-    }
     fn visit_size_match(self) -> ReduceStep {
         ReduceStep::SecColTripleized(self)
     }
@@ -621,7 +556,7 @@ impl ReduceQueue {
 /// Find all reduction rules we should start with for the given board.
 fn build_queue(remaining: &RemainingTracker) -> ReduceQueue {
     let mut queue = ReduceQueue::new();
-    for (coord, avail) in remaining.board.iter() {
+    for (coord, avail) in remaining.get::<Coord>().iter() {
         if avail.is_single() {
             queue.push(ReduceStep::CoordSingularized(coord))
         }
@@ -637,7 +572,7 @@ fn build_queue(remaining: &RemainingTracker) -> ReduceQueue {
 /// Adds entries to vist any row/col/sector that already has entries which can
 /// only occupy a single cell.
 fn build_row_col_sec_queue<Z: RowColSec>(rem: &RemainingTracker, queue: &mut ReduceQueue) {
-    for (rcs, avail) in Z::all_remaining(rem).iter() {
+    for (rcs, avail) in rem.get::<Z>().iter() {
         if avail.counts().any(|(_, &count)| count == 1) {
             queue.push(rcs.visit());
         }
@@ -646,13 +581,13 @@ fn build_row_col_sec_queue<Z: RowColSec>(rem: &RemainingTracker, queue: &mut Red
 
 /// Adds entries to visit any sector-row/sector-col that already reductions available.
 fn build_secrow_seccol_queue<Z: SecRowSecCol>(rem: &RemainingTracker, queue: &mut ReduceQueue) {
-    for (srsc, avail) in Z::all_remaining(rem).iter() {
+    for (srsc, avail) in rem.get::<Z>().iter() {
         if avail.avail().len() == Z::SIZE {
             queue.push(srsc.visit_size_match());
         }
         if avail
             .counts()
-            .any(|(val, &count)| count == srsc.line().remaining(rem)[val])
+            .any(|(val, &count)| count == rem[srsc.line()][val])
         {
             queue.push(srsc.visit_only_in_line());
         }
