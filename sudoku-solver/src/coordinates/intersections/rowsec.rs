@@ -1,3 +1,4 @@
+use std::array;
 use std::iter::FusedIterator;
 
 #[cfg(feature = "serde")]
@@ -8,7 +9,9 @@ use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
 use crate::{Col, Coord, Intersect, Row, Sector, SectorCol};
 
 /// A row within a sector.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Sector rows sort in the same order as their equivalent indexes, by row then
+/// by column (so across the rows).
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SectorRow {
     /// The row relative to the sector.
@@ -43,6 +46,18 @@ impl SectorRow {
     #[inline]
     pub fn base_col(&self) -> Col {
         self.base_col
+    }
+
+    /// Gets an iterator over the two SectorRows that share the same row as this one.
+    #[inline]
+    pub fn row_neighbors(self) -> array::IntoIter<Self, 2> {
+        array::IntoIter::new(super::array_filter_single_neq(self, self.row.sector_rows()))
+    }
+
+    /// Gets an iterator over the two SectorRows that share the same sector as this one.
+    #[inline]
+    pub fn sector_neighbors(self) -> array::IntoIter<Self, 2> {
+        array::IntoIter::new(super::array_filter_single_neq(self, self.sector().rows()))
     }
 
     /// Iterator over all SectorRows in the rest of the sector and row.
@@ -212,6 +227,7 @@ mod tests {
         }
         let result: Vec<_> = SectorRow::values().collect();
         assert_eq!(result, expected);
+        assert_sorted!(result);
         for (idx, val) in result.iter().enumerate() {
             assert_eq!(val.idx(), idx);
         }

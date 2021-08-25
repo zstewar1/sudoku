@@ -1,11 +1,12 @@
 use std::iter::FusedIterator;
-use std::ops::{Add, AddAssign, BitOr, BitOrAssign, Index, IndexMut, Not, Sub, SubAssign};
+use std::fmt::{self, Write};
+use std::ops::{Add, AddAssign, BitOr, BitOrAssign, BitAnd, BitAndAssign, Index, IndexMut, Not, Sub, SubAssign};
 
 use crate::collections::indexed::IndexMap;
 use crate::{FixedSizeIndex, Val, Values};
 
 /// Set of available numbers.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub struct AvailSet(u16);
 
@@ -98,6 +99,20 @@ impl AvailSet {
     }
 }
 
+impl fmt::Debug for AvailSet {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_char('[')?;
+        let mut iter = self.iter();
+        if let Some(n) = iter.next() {
+            write!(f, "{}", n.val())?;
+        }
+        for n in iter {
+            write!(f, ",{}", n.val())?;
+        }
+        f.write_char(']')
+    }
+}
+
 impl BitOr<Val> for AvailSet {
     type Output = Self;
 
@@ -111,7 +126,24 @@ impl BitOr<Val> for AvailSet {
 impl BitOrAssign<Val> for AvailSet {
     #[inline]
     fn bitor_assign(&mut self, rhs: Val) {
-        self.0 |= Self::to_mask(rhs);
+        *self |= AvailSet::only(rhs);
+    }
+}
+
+impl BitAnd<Val> for AvailSet {
+    type Output = Self;
+
+    #[inline]
+    fn bitand(mut self, rhs: Val) -> Self::Output {
+        self &= rhs;
+        self
+    }
+}
+
+impl BitAndAssign<Val> for AvailSet {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: Val) {
+        *self &= AvailSet::only(rhs);
     }
 }
 
@@ -128,7 +160,16 @@ impl Sub<Val> for AvailSet {
 impl SubAssign<Val> for AvailSet {
     #[inline]
     fn sub_assign(&mut self, rhs: Val) {
-        self.0 &= !Self::to_mask(rhs);
+        *self -= AvailSet::only(rhs);
+    }
+}
+
+impl Not for Val {
+    type Output = AvailSet;
+
+    #[inline]
+    fn not(self) -> Self::Output {
+        !AvailSet::only(self)
     }
 }
 
@@ -155,6 +196,23 @@ impl BitOrAssign for AvailSet {
     #[inline]
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
+    }
+}
+
+impl BitAnd for AvailSet {
+    type Output = Self;
+
+    #[inline]
+    fn bitand(mut self, rhs: Self) -> Self::Output {
+        self &= rhs;
+        self
+    }
+}
+
+impl BitAndAssign for AvailSet {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
     }
 }
 

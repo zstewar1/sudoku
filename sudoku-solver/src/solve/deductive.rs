@@ -1,8 +1,12 @@
 //! Implements logic for deductively proving what values belong in which cells.
-use std::collections::VecDeque;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashSet};
+use std::{array, fmt};
 
 use log::trace;
 
+use crate::collections::availset::AvailCounter;
+use crate::collections::indexed::IndexMap;
 use crate::solve::remaining::RemainingTracker;
 use crate::trace::{DeductionReason, DeductiveTracer, UnsolveableReason};
 use crate::{AvailSet, Col, Coord, Row, Sector, SectorCol, SectorRow, Val, Zone};
@@ -18,7 +22,7 @@ where
 
 struct DeductiveReducer<'a, T> {
     remaining: RemainingTracker,
-    queue: VecDeque<ReduceStep>,
+    queue: ReduceQueue,
     tracer: &'a mut T,
 }
 
@@ -41,20 +45,18 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
     /// Reduce the given board by applying the reduction rules.
     fn reduce(&mut self) -> Result<(), ()> {
         self.deduce(DeductionReason::InitialState);
-        while let Some(next_step) = self.queue.pop_front() {
+        while let Some(next_step) = self.queue.pop() {
             match next_step {
                 ReduceStep::CoordSingularized(coord) => self.coord_singularized(coord)?,
-                ReduceStep::RowValSingularized(row, val) => self.row_val_singularized(row, val)?,
-                ReduceStep::ColValSingularized(col, val) => self.col_val_singularized(col, val)?,
-                ReduceStep::SecValSingularized(sec, val) => self.sec_val_singularized(sec, val)?,
-                ReduceStep::SecRowTripleized(secrow) => self.secrow_tripleized(secrow)?,
-                ReduceStep::SecColTripleized(seccol) => self.seccol_tripleized(seccol)?,
-                ReduceStep::SecRowValEliminated(secrow, val) => {
-                    self.secrow_val_eliminated(secrow, val)?
-                }
-                ReduceStep::SecColValEliminated(seccol, val) => {
-                    self.seccol_val_eliminated(seccol, val)?
-                }
+                ReduceStep::RowValsSingularized(row) => self.rcs_vals_singularized(row)?,
+                ReduceStep::ColValsSingularized(col) => self.rcs_vals_singularized(col)?,
+                ReduceStep::SecValsSingularized(sec) => self.rcs_vals_singularized(sec)?,
+                ReduceStep::SecRowTripleized(secrow) => self.secrow_seccol_tripleized(secrow)?,
+                ReduceStep::SecColTripleized(seccol) => self.secrow_seccol_tripleized(seccol)?,
+                ReduceStep::RowOnlySec(secrow) => self.secrow_seccol_only_in_line(secrow)?,
+                ReduceStep::SecOnlyRow(secrow) => self.secrow_seccol_only_in_sec(secrow)?,
+                ReduceStep::ColOnlySec(seccol) => self.secrow_seccol_only_in_line(seccol)?,
+                ReduceStep::SecOnlyCol(seccol) => self.secrow_seccol_only_in_sec(seccol)?,
             }
         }
         Ok(())
@@ -76,201 +78,98 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
     }
 
     /// Visit a row which now has only one cell left for some value.
-    fn row_val_singularized(&mut self, row: Row, val: Val) -> Result<(), ()> {
-        // If this fails, we either enqueued a row-value that still had numbers, or we
-        // eliminated the last copy of a number from a row but didn't stop.
-        debug_assert!(self.remaining[row][val] == 1);
-        // Get the other values in the cell that we are singularizing.
-        let (coord, other_vals) = row
-            .coords()
-            .find_map(|coord| {
-                let mut cell = self.remaining[coord];
-                if cell.remove(val) {
-                    Some((coord, cell))
-                } else {
-                    None
+    fn rcs_vals_singularized<Z: RowColSec>(&mut self, rcs: Z) -> Result<(), ()> {
+        let singles = rcs.remaining(&self.remaining).counts().fold(
+            AvailSet::none(),
+            |mut singles, (val, &count)| {
+                if count == 1 {
+                    singles |= val;
                 }
-            })
-            .unwrap();
-        if !self.eliminate_all(coord, other_vals)?.is_empty() {
-            self.deduce(DeductionReason::UniqueInRow { pos: coord, val });
+                singles
+            },
+        );
+        let mut deduced = AvailSet::none();
+        for coord in rcs.coords() {
+            let rem = self.remaining[coord];
+            let matches = rem & singles;
+            if !matches.is_empty() {
+                if !matches.is_single() {
+                    trace!(
+                        "Stopped deductive because {:?} had two values {:?} with {:?} as their only possible position",
+                        rcs,
+                        matches,
+                        coord,
+                    );
+                    return Err(());
+                }
+                let others = rem - singles;
+                if !self.eliminate_all(coord, others)?.is_empty() {
+                    deduced |= matches;
+                }
+            }
         }
-        Ok(())
-    }
-
-    /// Visit a col which now has only one cell left for some value.
-    fn col_val_singularized(&mut self, col: Col, val: Val) -> Result<(), ()> {
-        // If this fails, we either enqueued a col-value that still had numbers, or we
-        // eliminated the last copy of a number from a col but didn't stop.
-        debug_assert!(self.remaining[col][val] == 1);
-        // Get the other values in the cell that we are singularizing.
-        let (coord, other_vals) = col
-            .coords()
-            .find_map(|coord| {
-                let mut cell = self.remaining[coord];
-                if cell.remove(val) {
-                    Some((coord, cell))
-                } else {
-                    None
-                }
-            })
-            .unwrap();
-        if !self.eliminate_all(coord, other_vals)?.is_empty() {
-            self.deduce(DeductionReason::UniqueInCol { pos: coord, val });
-        }
-        Ok(())
-    }
-
-    /// Visit a sector which now has only one cell left for some value.
-    fn sec_val_singularized(&mut self, sec: Sector, val: Val) -> Result<(), ()> {
-        // If this fails, we either enqueued a sec-value that still had numbers, or we
-        // eliminated the last copy of a number from a col but didn't stop.
-        debug_assert!(self.remaining[sec][val] == 1);
-        // Get the other values in the cell that we are singularizing.
-        let (coord, other_vals) = sec
-            .coords()
-            .find_map(|coord| {
-                let mut cell = self.remaining[coord];
-                if cell.remove(val) {
-                    Some((coord, cell))
-                } else {
-                    None
-                }
-            })
-            .unwrap();
-        if !self.eliminate_all(coord, other_vals)?.is_empty() {
-            self.deduce(DeductionReason::UniqueInSector { pos: coord, val });
+        if !deduced.is_empty() {
+            self.deduce(rcs.deduced(deduced));
         }
         Ok(())
     }
 
     /// Eliminates all values in this sector-row from the rest of the row and sector.
-    fn secrow_tripleized(&mut self, secrow: SectorRow) -> Result<(), ()> {
-        let mut eliminated = AvailSet::none();
-        let values = self.remaining[secrow].avail();
+    fn secrow_seccol_tripleized<Z: SecRowSecCol>(&mut self, srsc: Z) -> Result<(), ()> {
+        let values = srsc.remaining(&self.remaining).avail();
         // If this fails we became unsolveable but didn't stop.
-        debug_assert!(values.len() == SectorRow::SIZE);
-        for neighbor in secrow.neighbors() {
-            eliminated |= self.eliminate_all(neighbor, values)?;
-        }
+        debug_assert!(values.len() == Z::SIZE);
+        let eliminated = self.eliminate_all(
+            srsc.line_neighbors().chain(srsc.sec_neighbors()).flatten(),
+            values,
+        )?;
         if !eliminated.is_empty() {
-            self.deduce(DeductionReason::SecOnlyRow {
-                pos: secrow,
-                vals: eliminated,
-            });
+            self.deduce(srsc.deduced_size_match(eliminated));
         }
         Ok(())
     }
 
-    /// Eliminates all values in this sector-col from the rest of the col and sector.
-    fn seccol_tripleized(&mut self, seccol: SectorCol) -> Result<(), ()> {
-        let mut eliminated = AvailSet::none();
-        let values = self.remaining[seccol].avail();
-        // If this fails we became unsolveable but didn't stop.
-        debug_assert!(values.len() == SectorCol::SIZE);
-        for neighbor in seccol.neighbors() {
-            eliminated |= self.eliminate_all(neighbor, values)?;
-        }
-        if !eliminated.is_empty() {
-            self.deduce(DeductionReason::SecOnlyCol {
-                pos: seccol,
-                vals: eliminated,
-            });
-        }
-        Ok(())
-    }
-
-    /// Handle a value from a sector-row being eliminated.
-    fn secrow_val_eliminated(&mut self, secrow: SectorRow, val: Val) -> Result<(), ()> {
-        // Visit all sector-row neighbors of the affected sector-row.
-        for neighbor in secrow.neighbors() {
-            if self.remaining[neighbor][val] == self.remaining[neighbor.row()][val] {
-                let mut eliminated = AvailSet::none();
-                // If the neighbor is the last one in its row containing the
-                // given value, eliminate the value from the rest of the
-                // neighbor's sector.
-                for sec_secrow in neighbor.sector().rows() {
-                    if sec_secrow != neighbor {
-                        eliminated |= self.eliminate_all(sec_secrow, Some(val))?;
-                    }
+    /// Eliminates values in this sector-row/sector-col which have the same count
+    /// as the row/col from the rest of the sector.
+    fn secrow_seccol_only_in_line<Z: SecRowSecCol>(&mut self, srsc: Z) -> Result<(), ()> {
+        let uniques = srsc.remaining(&self.remaining).counts().fold(
+            AvailSet::none(),
+            |mut uniques, (val, &count)| {
+                if count == srsc.line().remaining(&self.remaining)[val] {
+                    uniques |= val;
                 }
-                if !eliminated.is_empty() {
-                    self.deduce(DeductionReason::RowOnlySec {
-                        pos: neighbor,
-                        val: val,
-                    });
-                }
-            } else if self.remaining[neighbor][val] == self.remaining[neighbor.sector()][val] {
-                let mut eliminated = AvailSet::none();
-                // Mutually exclusive with above, because if we hit above, we
-                // already eliminated the value from the rest of the sector.
-                //
-                // If the neighbor is the last one in its sector containing the
-                // given value, eliminate the value from the rest of the
-                // neighbor's row.
-                for row_secrow in neighbor.row().sector_rows() {
-                    if row_secrow != neighbor {
-                        eliminated |= self.eliminate_all(row_secrow, Some(val))?;
-                    }
-                }
-                if !eliminated.is_empty() {
-                    self.deduce(DeductionReason::SecOnlyRow {
-                        pos: neighbor,
-                        vals: AvailSet::only(val),
-                    });
-                }
-            }
+                uniques
+            },
+        );
+        let deduced = self.eliminate_all(srsc.sec_neighbors().flatten(), uniques)?;
+        if !deduced.is_empty() {
+            self.deduce(srsc.deduced_only_in_line(deduced));
         }
         Ok(())
     }
 
-    /// Handle a value from a sector-col being eliminated.
-    fn seccol_val_eliminated(&mut self, seccol: SectorCol, val: Val) -> Result<(), ()> {
-        // Visit all sector-col neighbors of the affected sector-col.
-        for neighbor in seccol.neighbors() {
-            if self.remaining[neighbor][val] == self.remaining[neighbor.col()][val] {
-                let mut eliminated = AvailSet::none();
-                // If the neighbor is the last one in its col containing the
-                // given value, eliminate the value from the rest of the
-                // neighbor's sector.
-                for sec_seccol in neighbor.sector().cols() {
-                    if sec_seccol != neighbor {
-                        eliminated |= self.eliminate_all(sec_seccol, Some(val))?;
-                    }
+    /// Eliminates values in this sector-row/sector-col which have the same count
+    /// as the sector from the rest of the row/col.
+    fn secrow_seccol_only_in_sec<Z: SecRowSecCol>(&mut self, srsc: Z) -> Result<(), ()> {
+        let uniques = srsc.remaining(&self.remaining).counts().fold(
+            AvailSet::none(),
+            |mut uniques, (val, &count)| {
+                if count == self.remaining[srsc.sector()][val] {
+                    uniques |= val;
                 }
-                if !eliminated.is_empty() {
-                    self.deduce(DeductionReason::ColOnlySec {
-                        pos: neighbor,
-                        val: val,
-                    });
-                }
-            } else if self.remaining[neighbor][val] == self.remaining[neighbor.sector()][val] {
-                let mut eliminated = AvailSet::none();
-                // Mutually exclusive with above, because if we hit above, we
-                // already eliminated the value from the rest of the sector.
-                //
-                // If the neighbor is the last one in its sector containing the
-                // given value, eliminate the value from the rest of the
-                // neighbor's row.
-                for col_seccol in neighbor.col().sector_cols() {
-                    if col_seccol != neighbor {
-                        eliminated |= self.eliminate_all(col_seccol, Some(val))?;
-                    }
-                }
-                if !eliminated.is_empty() {
-                    self.deduce(DeductionReason::SecOnlyCol {
-                        pos: neighbor,
-                        vals: eliminated,
-                    });
-                }
-            }
+                uniques
+            },
+        );
+        let deduced = self.eliminate_all(srsc.line_neighbors().flatten(), uniques)?;
+        if !deduced.is_empty() {
+            self.deduce(srsc.deduced_only_in_sec(deduced));
         }
         Ok(())
     }
 
     /// Convenience function to eliminate all values in the given AvailSet from all coords
     /// in the given zone.
-    /// Returns true if any values were eliminated.
+    /// Returns the set of values that were eliminated.
     fn eliminate_all(
         &mut self,
         zone: impl IntoIterator<Item = Coord>,
@@ -287,15 +186,16 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
         Ok(eliminated)
     }
 
-    /// Eliminate the given value from a single cell, pushing new reduce steps for the
-    /// effects on the row, column, an sector.
+    /// Eliminate the given value from a single cell, pushing new reduce steps
+    /// for the effects on the row, column, an sector. Return true if the value
+    /// existed previously.
     fn eliminate(&mut self, coord: Coord, val: Val) -> Result<bool, ()> {
         if self.eliminate_from_cell(coord, val)? {
-            self.eliminate_from_row(coord.row(), val)?;
-            self.eliminate_from_col(coord.col(), val)?;
-            self.eliminate_from_sec(coord.sector(), val)?;
-            self.eliminate_from_secrow(coord.sector_row(), val)?;
-            self.eliminate_from_seccol(coord.sector_col(), val)?;
+            self.eliminate_from_rcs(coord.row(), val)?;
+            self.eliminate_from_rcs(coord.col(), val)?;
+            self.eliminate_from_rcs(coord.sector(), val)?;
+            self.eliminate_from_secrow_seccol(coord.sector_row(), val)?;
+            self.eliminate_from_secrow_seccol(coord.sector_col(), val)?;
             Ok(true)
         } else {
             Ok(false)
@@ -321,7 +221,7 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
                 return Err(());
             }
             if cell.is_single() {
-                self.queue.push_back(ReduceStep::CoordSingularized(coord));
+                self.queue.push(ReduceStep::CoordSingularized(coord));
             }
             Ok(true)
         } else {
@@ -330,182 +230,399 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
     }
 
     /// Eliminate a value from a row, pushing a row singularization if needed.
-    fn eliminate_from_row(&mut self, row: Row, val: Val) -> Result<(), ()> {
-        match self.remaining[row].remove(val) {
+    fn eliminate_from_rcs<Z: RowColSec>(&mut self, rcs: Z, val: Val) -> Result<(), ()> {
+        match rcs.remaining_mut(&mut self.remaining).remove(val) {
             // Last copy of that value eliminated from the row.
             Some(0) => {
                 trace!(
                     "Stopped deductive because {:?} no longer had {:?}",
-                    row,
+                    rcs,
                     val
                 );
                 return Err(());
             }
-            Some(1) => self
-                .queue
-                .push_back(ReduceStep::RowValSingularized(row, val)),
+            Some(1) => self.queue.push(rcs.visit()),
             Some(_) => {}
             None => panic!("Value was previously eliminated but reduction did not stop"),
         }
         Ok(())
     }
 
-    /// Eliminate a value from a col, pushing a col singularization if needed.
-    fn eliminate_from_col(&mut self, col: Col, val: Val) -> Result<(), ()> {
-        match self.remaining[col].remove(val) {
-            // Last copy of that value eliminated from the col.
-            Some(0) => {
-                trace!(
-                    "Stopped deductive because {:?} no longer had {:?}",
-                    col,
-                    val
-                );
-                return Err(());
-            }
-            Some(1) => self
-                .queue
-                .push_back(ReduceStep::ColValSingularized(col, val)),
-            Some(_) => {}
-            None => panic!("Value was previously eliminated but reduction did not stop"),
-        }
-        Ok(())
-    }
-
-    /// Eliminate a value from a sector, pushing a sector singularization if needed.
-    fn eliminate_from_sec(&mut self, sec: Sector, val: Val) -> Result<(), ()> {
-        match self.remaining[sec].remove(val) {
-            // Last copy of that value eliminated from the col.
-            Some(0) => {
-                trace!(
-                    "Stopped deductive because {:?} no longer had {:?}",
-                    sec,
-                    val
-                );
-                return Err(());
-            }
-            Some(1) => self
-                .queue
-                .push_back(ReduceStep::SecValSingularized(sec, val)),
-            Some(_) => {}
-            None => panic!("Value was previously eliminated but reduction did not stop"),
-        }
-        Ok(())
-    }
-
-    /// Eliminate a value from a sector-row, pushing as needed a sector-row tripleization
-    /// or value elimination step.
-    fn eliminate_from_secrow(&mut self, secrow: SectorRow, val: Val) -> Result<(), ()> {
-        let cell = &mut self.remaining[secrow];
-        if let Some(0) = cell.remove(val) {
-            // Just eliminated the last of some number from this sector-row, so check if
-            // the number of remaining values is equal to or less than the size.
-            let num_avail = cell.avail().len();
-            if num_avail < SectorRow::SIZE {
-                trace!(
-                    "Stopped deductive because {:?} had fewer than three values remaining",
-                    secrow
-                );
-                return Err(());
-            } else if num_avail == SectorRow::SIZE {
-                self.queue.push_back(ReduceStep::SecRowTripleized(secrow));
-            }
-            self.queue
-                .push_back(ReduceStep::SecRowValEliminated(secrow, val));
-        }
-        Ok(())
-    }
-
-    /// Eliminate a value from a sector-column, pushing as needed a sector-column
+    /// Eliminate a value from a sector-row/sector-col, pushing as needed a sector-row
     /// tripleization or value elimination step.
-    fn eliminate_from_seccol(&mut self, seccol: SectorCol, val: Val) -> Result<(), ()> {
-        let cell = &mut self.remaining[seccol];
+    fn eliminate_from_secrow_seccol<Z: SecRowSecCol>(
+        &mut self,
+        srsc: Z,
+        val: Val,
+    ) -> Result<(), ()> {
+        let cell = srsc.remaining_mut(&mut self.remaining);
         if let Some(0) = cell.remove(val) {
             // Just eliminated the last of some number from this sector-row, so check if
             // the number of remaining values is equal to or less than the size.
             let num_avail = cell.avail().len();
-            if num_avail < SectorCol::SIZE {
+            if num_avail < Z::SIZE {
                 trace!(
-                    "Stopped deductive because {:?} had fewer than three values remaining",
-                    seccol
+                    "Stopped deductive because {:?} had fewer than {} values remaining",
+                    srsc,
+                    Z::SIZE,
                 );
                 return Err(());
-            } else if num_avail == SectorCol::SIZE {
-                self.queue.push_back(ReduceStep::SecColTripleized(seccol));
+            } else if num_avail == Z::SIZE {
+                self.queue.push(srsc.visit_size_match());
             }
-            self.queue
-                .push_back(ReduceStep::SecColValEliminated(seccol, val));
+            for neighbor in srsc.line_neighbors() {
+                if neighbor.remaining(&self.remaining)[val]
+                    == neighbor.line().remaining(&self.remaining)[val]
+                {
+                    self.queue.push(neighbor.visit_only_in_line());
+                    break;
+                }
+            }
+            for neighbor in srsc.sec_neighbors() {
+                if neighbor.remaining(&self.remaining)[val]
+                    == self.remaining[neighbor.sector()][val]
+                {
+                    self.queue.push(neighbor.visit_only_in_sec());
+                    break;
+                }
+            }
         }
         Ok(())
+    }
+}
+
+/// Helper for generalizing row/col/sector.
+trait RowColSec: Zone + fmt::Debug + Copy {
+    /// Get the map of all remaining for this row/col/sector.
+    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter>
+    where
+        Self: Sized;
+    /// Get the remaining count at the current row/col/sector.
+    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter;
+    /// Get the mutable remaining count at the current row/col/sector.
+    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter;
+
+    /// Build a reduce step to visit this.
+    fn visit(self) -> ReduceStep;
+
+    /// Build the DeductionReason for this.
+    fn deduced(self, vals: AvailSet) -> DeductionReason;
+}
+
+impl RowColSec for Row {
+    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
+        &rem.rows
+    }
+    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
+        &rem[self]
+    }
+    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
+        &mut rem[self]
+    }
+    fn visit(self) -> ReduceStep {
+        ReduceStep::RowValsSingularized(self)
+    }
+    fn deduced(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::UniqueInRow { pos: self, vals }
+    }
+}
+
+impl RowColSec for Col {
+    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
+        &rem.cols
+    }
+    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
+        &rem[self]
+    }
+    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
+        &mut rem[self]
+    }
+    fn visit(self) -> ReduceStep {
+        ReduceStep::ColValsSingularized(self)
+    }
+    fn deduced(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::UniqueInCol { pos: self, vals }
+    }
+}
+
+impl RowColSec for Sector {
+    fn all_remaining(rem: &RemainingTracker) -> &IndexMap<Self, AvailCounter> {
+        &rem.sectors
+    }
+    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
+        &rem[self]
+    }
+    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
+        &mut rem[self]
+    }
+    fn visit(self) -> ReduceStep {
+        ReduceStep::SecValsSingularized(self)
+    }
+    fn deduced(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::UniqueInSector { pos: self, vals }
+    }
+}
+
+/// Helper trait for generalizing row-sector and col-sector.
+trait SecRowSecCol: Zone + fmt::Debug + Copy {
+    /// Get the remaining count at the current sector-row/sector-col.
+    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter;
+    /// Get the mutable remaining count at the current sector-row/sector-col.
+    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter;
+    /// Build a reduce step to visit this when the number of remaining values
+    /// matches the SIZE.
+    fn visit_size_match(self) -> ReduceStep;
+
+    /// Type of the linear direction.
+    type Line: RowColSec;
+    /// Gets the line this is a part of.
+    fn line(self) -> Self::Line;
+    /// Get an iterator over neighbors in the same row/col as self.
+    fn line_neighbors(self) -> array::IntoIter<Self, 2>
+    where
+        Self: Sized;
+
+    /// Gets the sector this is a part of.
+    fn sector(self) -> Sector;
+    /// Get an iterator over neighbors in the same sector as self.
+    fn sec_neighbors(self) -> array::IntoIter<Self, 2>
+    where
+        Self: Sized;
+
+    /// Visit this sector-row/sector-col as the only one in the row/col
+    /// containing some values.
+    fn visit_only_in_line(self) -> ReduceStep;
+    /// Visit this sector-row/sector-col as the only one in the sector containing
+    /// some values.
+    fn visit_only_in_sec(self) -> ReduceStep;
+
+    /// Eliminated the given values based on this sector-row/sector-col having
+    /// only 3 values left.
+    fn deduced_size_match(self, vals: AvailSet) -> DeductionReason;
+    /// Eliminated the given values based on this sector-row/sector-col being the
+    /// only one in the row/col that could hold the given values.
+    fn deduced_only_in_line(self, vals: AvailSet) -> DeductionReason;
+    /// Eliminated the given values based on this sector-row/sector-col being the
+    /// only one in the sector that could hold the given values.
+    fn deduced_only_in_sec(self, vals: AvailSet) -> DeductionReason;
+}
+
+impl SecRowSecCol for SectorRow {
+    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
+        &rem[self]
+    }
+    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
+        &mut rem[self]
+    }
+    fn visit_size_match(self) -> ReduceStep {
+        ReduceStep::SecRowTripleized(self)
+    }
+    type Line = Row;
+    fn line(self) -> Self::Line {
+        self.row()
+    }
+    fn line_neighbors(self) -> array::IntoIter<Self, 2> {
+        self.row_neighbors()
+    }
+    fn sector(self) -> Sector {
+        SectorRow::sector(&self)
+    }
+    fn sec_neighbors(self) -> array::IntoIter<Self, 2> {
+        self.sector_neighbors()
+    }
+    fn visit_only_in_line(self) -> ReduceStep {
+        ReduceStep::RowOnlySec(self)
+    }
+    fn visit_only_in_sec(self) -> ReduceStep {
+        ReduceStep::SecOnlyRow(self)
+    }
+    fn deduced_size_match(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::SecRowTriple { pos: self, vals }
+    }
+    fn deduced_only_in_line(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::RowOnlySec { pos: self, vals }
+    }
+    fn deduced_only_in_sec(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::SecOnlyRow { pos: self, vals }
+    }
+}
+
+impl SecRowSecCol for SectorCol {
+    fn remaining(self, rem: &RemainingTracker) -> &AvailCounter {
+        &rem[self]
+    }
+    fn remaining_mut(self, rem: &mut RemainingTracker) -> &mut AvailCounter {
+        &mut rem[self]
+    }
+    fn visit_size_match(self) -> ReduceStep {
+        ReduceStep::SecColTripleized(self)
+    }
+    type Line = Col;
+    fn line(self) -> Self::Line {
+        self.col()
+    }
+    fn line_neighbors(self) -> array::IntoIter<Self, 2> {
+        self.col_neighbors()
+    }
+    fn sector(self) -> Sector {
+        SectorCol::sector(&self)
+    }
+    fn sec_neighbors(self) -> array::IntoIter<Self, 2> {
+        self.sector_neighbors()
+    }
+    fn visit_only_in_line(self) -> ReduceStep {
+        ReduceStep::ColOnlySec(self)
+    }
+    fn visit_only_in_sec(self) -> ReduceStep {
+        ReduceStep::SecOnlyCol(self)
+    }
+    fn deduced_size_match(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::SecColTriple { pos: self, vals }
+    }
+    fn deduced_only_in_line(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::ColOnlySec { pos: self, vals }
+    }
+    fn deduced_only_in_sec(self, vals: AvailSet) -> DeductionReason {
+        DeductionReason::SecOnlyCol { pos: self, vals }
     }
 }
 
 /// Steps to apply to reduce the remaining values.
+/// Reduce steps compare equal if they have the enum Variant and Zone, regardless of
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum ReduceStep {
     /// The given coordinate changed to only have one value left.
+    /// Will only be enqueued once for each cell.
     CoordSingularized(Coord),
-    /// The given row changed so there is only one slot left that could hold the
-    /// given value.
-    RowValSingularized(Row, Val),
-    /// The given col changed so there is only one slot left that could hold the
-    /// given value.
-    ColValSingularized(Col, Val),
+    /// The given row changed so there is only one slot left that could hold some
+    /// value.
+    /// May be enqueued and processed more than once for each row.
+    RowValsSingularized(Row),
+    /// The given col changed so there is only one slot left that could hold some
+    /// value.
+    /// May be enqueued and processed more than once for each col.
+    ColValsSingularized(Col),
     /// The given sector changed so there is only one slot left that could hold
-    /// the given value.
-    SecValSingularized(Sector, Val),
+    /// some value.
+    /// May be enqueued and processed more than once for each sector.
+    SecValsSingularized(Sector),
     /// The given sector-row changed so the number of values left is exactly 3.
+    /// Will only be enqueued once per sector-row.
     SecRowTripleized(SectorRow),
     /// The given sector-col changed so the number of values left is exactly 3.
+    /// Will only be enqueued once per sector-col.
     SecColTripleized(SectorCol),
-    /// The given value was eliminated from this sector-row.
-    SecRowValEliminated(SectorRow, Val),
-    /// The given value was eliminated from this sector-col.
-    SecColValEliminated(SectorCol, Val),
+    /// The sector row changed so it is the only place left in its row that can
+    /// hold one or more values, so those values can be eliminated from the rest
+    /// of the sector.
+    /// May be enqueued more than once per sector-row.
+    RowOnlySec(SectorRow),
+    /// The sector row changed so it is the only place left in its sector that
+    /// can hold one or more values, so those values can be eliminated from the
+    /// rest of the row.
+    /// May be enqueued more than once per sector-row.
+    SecOnlyRow(SectorRow),
+    /// The sector col changed so it is the only place left in its col that can
+    /// hold one or more values, so those values can be eliminated from the rest
+    /// of the sector.
+    /// May be enqueued more than once per sector-col.
+    ColOnlySec(SectorCol),
+    /// The sector col changed so it is the only place left in its sector that
+    /// can hold one or more values, so those values can be eliminated from the
+    /// rest of the col.
+    /// May be enqueued more than once per sector-col.
+    SecOnlyCol(SectorCol),
+}
+
+/// Reduce queue which auto-combines certain reduce operations.
+struct ReduceQueue {
+    /// Min heap of ReduceSteps to be executed.
+    pending: BinaryHeap<Reverse<ReduceStep>>,
+    /// Hash set used to dedup the heap.
+    dedup: HashSet<ReduceStep>,
+}
+
+impl ReduceQueue {
+    fn new() -> Self {
+        Self {
+            pending: BinaryHeap::new(),
+            dedup: HashSet::new(),
+        }
+    }
+
+    /// Add a reduce step to the queue if not already there.
+    fn push(&mut self, step: ReduceStep) {
+        if self.dedup.insert(step) {
+            self.pending.push(Reverse(step));
+        }
+    }
+
+    /// Remove a reduce step from the queue.
+    fn pop(&mut self) -> Option<ReduceStep> {
+        match self.pending.pop() {
+            Some(Reverse(step)) => {
+                assert!(self.dedup.remove(&step));
+                Some(step)
+            }
+            None => None,
+        }
+    }
 }
 
 /// Find all reduction rules we should start with for the given board.
-fn build_queue(remaining: &RemainingTracker) -> VecDeque<ReduceStep> {
-    let mut queue = VecDeque::new();
+fn build_queue(remaining: &RemainingTracker) -> ReduceQueue {
+    let mut queue = ReduceQueue::new();
     for (coord, avail) in remaining.board.iter() {
         if avail.is_single() {
-            queue.push_back(ReduceStep::CoordSingularized(coord))
+            queue.push(ReduceStep::CoordSingularized(coord))
         }
     }
-    for (row, avail) in remaining.rows.iter() {
-        for (val, &count) in avail.counts() {
-            if count == 1 {
-                queue.push_back(ReduceStep::RowValSingularized(row, val));
-            }
-        }
-    }
-    for (col, avail) in remaining.cols.iter() {
-        for (val, &count) in avail.counts() {
-            if count == 1 {
-                queue.push_back(ReduceStep::ColValSingularized(col, val));
-            }
-        }
-    }
-    for (sec, avail) in remaining.sectors.iter() {
-        for (val, &count) in avail.counts() {
-            if count == 1 {
-                queue.push_back(ReduceStep::SecValSingularized(sec, val));
-            }
-        }
-    }
+    build_row_col_sec_queue::<Row>(remaining, &mut queue);
+    build_row_col_sec_queue::<Col>(remaining, &mut queue);
+    build_row_col_sec_queue::<Sector>(remaining, &mut queue);
     for (secrow, avail) in remaining.sector_rows.iter() {
         if avail.avail().len() == SectorRow::SIZE {
-            queue.push_back(ReduceStep::SecRowTripleized(secrow));
+            queue.push(ReduceStep::SecRowTripleized(secrow));
         }
-        for val in (!avail.avail()).iter() {
-            queue.push_back(ReduceStep::SecRowValEliminated(secrow, val));
+        if avail
+            .counts()
+            .any(|(val, &count)| count == remaining[secrow.row()][val])
+        {
+            queue.push(ReduceStep::RowOnlySec(secrow));
+        }
+        if avail
+            .counts()
+            .any(|(val, &count)| count == remaining[secrow.sector()][val])
+        {
+            queue.push(ReduceStep::SecOnlyRow(secrow));
         }
     }
     for (seccol, avail) in remaining.sector_cols.iter() {
         if avail.avail().len() == SectorCol::SIZE {
-            queue.push_back(ReduceStep::SecColTripleized(seccol));
+            queue.push(ReduceStep::SecColTripleized(seccol));
         }
-        for val in (!avail.avail()).iter() {
-            queue.push_back(ReduceStep::SecColValEliminated(seccol, val));
+        if avail
+            .counts()
+            .any(|(val, &count)| count == remaining[seccol.col()][val])
+        {
+            queue.push(ReduceStep::ColOnlySec(seccol));
+        }
+        if avail
+            .counts()
+            .any(|(val, &count)| count == remaining[seccol.sector()][val])
+        {
+            queue.push(ReduceStep::SecOnlyCol(seccol));
         }
     }
     queue
+}
+
+/// Adds entries to vist any row/col/sector that already has entries which can
+/// only occupy a single cell.
+fn build_row_col_sec_queue<Z: RowColSec>(rem: &RemainingTracker, queue: &mut ReduceQueue) {
+    for (rcs, avail) in Z::all_remaining(rem).iter() {
+        if avail.counts().any(|(_, &count)| count == 1) {
+            queue.push(rcs.visit());
+        }
+    }
 }

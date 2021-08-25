@@ -8,7 +8,9 @@ use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
 use crate::{Col, Coord, Row, SectorCol, SectorRow, Zone};
 
 /// Identifies a single 3x3 sector on the sudoku board.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Sectors by row then by column (across each row, same as their index order and
+/// natural iteration order).
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Sector {
     /// Row (y) where the sector starts.
@@ -183,6 +185,7 @@ mod tests {
         }
         let result: Vec<_> = Sector::values().collect();
         assert_eq!(result, expected);
+        assert_sorted!(result);
         for (idx, val) in result.iter().enumerate() {
             assert_eq!(val.idx(), idx);
         }

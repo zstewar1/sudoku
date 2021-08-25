@@ -11,7 +11,7 @@ use crate::{Coord, Row, Sector, SectorCol, Zone};
 
 /// Uniquely identifies a single column on the sudoku board. That is all cells
 /// with the same x coordinate.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[repr(transparent)]
 #[cfg_attr(
     feature = "serde",
@@ -130,6 +130,7 @@ mod tests {
         }
         let result: Vec<_> = Col::values().collect();
         assert_eq!(result, expected);
+        assert_sorted!(result);
         for (idx, val) in result.iter().enumerate() {
             assert_eq!(val.idx(), idx);
         }

@@ -4,7 +4,7 @@ use std::ops::{Index, IndexMut};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{AvailSet, Board, Coord, SectorCol, SectorRow, Val};
+use crate::{AvailSet, Board, Coord, SectorCol, SectorRow, Val, Row, Col, Sector};
 use crate::collections::indexed::IndexMap;
 
 /// Records steps used during deductive reduction.
@@ -95,26 +95,37 @@ pub enum DeductionReason {
         pos: Coord, 
         val: Val,
     },
-    /// The given pos was the only place left in the row that could hold the
-    /// given value, so that value was eliminated from the rest of the column and
-    /// sector.
+    /// The given values each had only one cell left in the given row, so any
+    /// other values from those positions could be excluded.
     UniqueInRow {
-        pos: Coord, 
-        val: Val
+        pos: Row, 
+        vals: AvailSet,
     },
-    /// The given pos was the only place left in the column that could hold the
-    /// given value, so that value was eliminated from the rest of the row and
-    /// sector.
+    /// The given values each had only one cell left in the given col, so any
+    /// other values from those positions could be excluded.
     UniqueInCol {
-        pos: Coord, 
-        val: Val,
+        pos: Col, 
+        vals: AvailSet,
     },
-    /// The given pos was the only place left in the sector that could hold the
-    /// given value, so that value was eliminated from the rest of the row and
-    /// column.
+    /// The given values each had only one cell left in the given sector, so any
+    /// other values from those positions could be excluded.
     UniqueInSector {
-        pos: Coord, 
-        val: Val,
+        pos: Sector, 
+        vals: AvailSet,
+    },
+    /// The given sector-row has exactly 3 values left, so those can be
+    /// eliminated from the rest of the sector and row. The given values are the
+    /// ones that actually changed.
+    SecRowTriple {
+        pos: SectorRow,
+        vals: AvailSet,
+    },
+    /// The given sector-col has exactly 3 values left, so those can be
+    /// eliminated from the rest of the sector and col. The given values are the
+    /// ones that actually changed.
+    SecColTriple {
+        pos: SectorCol,
+        vals: AvailSet,
     },
     /// The given sector-row is the only one in the sector that could hold the
     /// given values, so those values are eliminated from the rest of the row.
@@ -133,14 +144,14 @@ pub enum DeductionReason {
     /// sector.
     RowOnlySec {
         pos: SectorRow,
-        val: Val,
+        vals: AvailSet,
     },
     /// The given sector-col is the only one left in the column that could hold
     /// the given value, so those values have been eliminated from the rest of
     /// the sector.
     ColOnlySec {
         pos: SectorCol,
-        val: Val,
+        vals: AvailSet,
     },
     /// The board was proven unsolveable for the given reason.
     Unsolveable(UnsolveableReason),

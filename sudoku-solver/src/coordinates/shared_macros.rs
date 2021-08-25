@@ -46,3 +46,12 @@ macro_rules! reciprocal_intersect {
         }
     };
 }
+
+#[cfg(test)]
+macro_rules! assert_sorted {
+    ($v:ident) => {
+        let mut sorted = $v.clone();
+        sorted.sort();
+        assert_eq!($v, sorted);
+    }
+}

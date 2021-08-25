@@ -56,3 +56,27 @@ impl Intersect<Col> for Row {
 }
 
 reciprocal_intersect!(<Row> for Col);
+
+/// Filter an iterator of N + 1 elements into an array of N elements.
+#[inline]
+fn array_filter_single_neq<T: Copy + Eq, const N: usize>(
+    skip: T,
+    iter: impl Iterator<Item = T> + ExactSizeIterator,
+) -> [T; N] {
+    debug_assert!(
+        iter.len() == N + 1,
+        "Incorrect number of values in iter, expected {} got {}",
+        N,
+        iter.len()
+    );
+    // T is copy, so we can conveniently pre-fill with the skip value.
+    let mut arr = [skip; N];
+    for (i, val) in iter.filter(|v| *v != skip).enumerate() {
+        arr[i] = val;
+    }
+    debug_assert!(
+        *arr.last().unwrap() != skip,
+        "More than one value got filtered"
+    );
+    arr
+}

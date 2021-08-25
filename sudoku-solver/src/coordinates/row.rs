@@ -11,7 +11,7 @@ use crate::{Col, Coord, Sector, SectorRow, Zone};
 
 /// Uniquely identifies a single row on the sudoku board. That is all cells with
 /// the same y coordinate.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[repr(transparent)]
 #[cfg_attr(
     feature = "serde",
@@ -129,6 +129,7 @@ mod tests {
         }
         let result: Vec<_> = Row::values().collect();
         assert_eq!(result, expected);
+        assert_sorted!(result);
         for (idx, val) in result.iter().enumerate() {
             assert_eq!(val.idx(), idx);
         }

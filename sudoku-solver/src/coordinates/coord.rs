@@ -10,7 +10,9 @@ use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
 use crate::{Col, OutOfRange, Row, Sector, SectorCol, SectorRow, Zone};
 
 /// Coordinates of a single cell on the Sudoku board.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Coordinates sort by row, then by column. This matches their index order and
+/// naural iteration order.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Coord {
     /// Row (y).
@@ -177,6 +179,7 @@ mod tests {
         }
         let result: Vec<_> = Coord::values().collect();
         assert_eq!(result, expected);
+        assert_sorted!(result);
         for (idx, val) in result.iter().enumerate() {
             assert_eq!(val.idx(), idx);
         }
