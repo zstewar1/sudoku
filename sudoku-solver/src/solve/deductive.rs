@@ -12,24 +12,26 @@ use crate::{AvailSet, Col, Coord, Row, Sector, SectorCol, SectorRow, Val, Zone};
 
 use super::remaining::ExtractRem;
 
-pub(crate) fn reduce<T>(remaining: RemainingTracker, tracer: &mut T) -> Option<RemainingTracker>
+pub(crate) fn reduce<T>(remaining: RemainingTracker, tracer: T) -> (Option<RemainingTracker>, T)
 where
     T: DeductiveTracer,
 {
     let mut reducer = DeductiveReducer::new(remaining, tracer);
-    reducer.reduce().ok()?;
-    Some(reducer.remaining)
+    match reducer.reduce() {
+        Ok(()) => (Some(reducer.remaining), reducer.tracer),
+        Err(()) => (None, reducer.tracer),
+    }
 }
 
-struct DeductiveReducer<'a, T> {
+struct DeductiveReducer<T> {
     remaining: RemainingTracker,
     queue: ReduceQueue,
-    tracer: &'a mut T,
+    tracer: T,
 }
 
-impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
+impl<'a, T: DeductiveTracer> DeductiveReducer<T> {
     /// Construct a reducer and enqueue the initial reduction steps.
-    fn new(remaining: RemainingTracker, tracer: &'a mut T) -> Self {
+    fn new(remaining: RemainingTracker, tracer: T) -> Self {
         let queue = build_queue(&remaining);
         DeductiveReducer {
             remaining,
@@ -88,15 +90,15 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
 
     /// Visit a row which now has only one cell left for some value.
     fn rcs_vals_singularized<Z: RowColSec>(&mut self, rcs: Z) -> Result<(), ()> {
-        let singles = self.remaining[rcs].counts().fold(
-            AvailSet::none(),
-            |mut singles, (val, &count)| {
-                if count == 1 {
-                    singles |= val;
-                }
-                singles
-            },
-        );
+        let singles =
+            self.remaining[rcs]
+                .counts()
+                .fold(AvailSet::none(), |mut singles, (val, &count)| {
+                    if count == 1 {
+                        singles |= val;
+                    }
+                    singles
+                });
         let mut deduced = AvailSet::none();
         for coord in rcs.coords() {
             let rem = self.remaining[coord];
@@ -142,15 +144,15 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
     /// Eliminates values in this sector-row/sector-col which have the same count
     /// as the row/col from the rest of the sector.
     fn secrow_seccol_only_in_line<Z: SecRowSecCol>(&mut self, srsc: Z) -> Result<(), ()> {
-        let uniques = self.remaining[srsc].counts().fold(
-            AvailSet::none(),
-            |mut uniques, (val, &count)| {
-                if count == self.remaining[srsc.line()][val] {
-                    uniques |= val;
-                }
-                uniques
-            },
-        );
+        let uniques =
+            self.remaining[srsc]
+                .counts()
+                .fold(AvailSet::none(), |mut uniques, (val, &count)| {
+                    if count == self.remaining[srsc.line()][val] {
+                        uniques |= val;
+                    }
+                    uniques
+                });
         let deduced = self.eliminate_all(srsc.sec_neighbors().flatten(), uniques)?;
         if !deduced.is_empty() {
             self.deduce(srsc.deduced_only_in_line(deduced));
@@ -161,15 +163,15 @@ impl<'a, T: DeductiveTracer> DeductiveReducer<'a, T> {
     /// Eliminates values in this sector-row/sector-col which have the same count
     /// as the sector from the rest of the row/col.
     fn secrow_seccol_only_in_sec<Z: SecRowSecCol>(&mut self, srsc: Z) -> Result<(), ()> {
-        let uniques = self.remaining[srsc].counts().fold(
-            AvailSet::none(),
-            |mut uniques, (val, &count)| {
-                if count == self.remaining[srsc.sector()][val] {
-                    uniques |= val;
-                }
-                uniques
-            },
-        );
+        let uniques =
+            self.remaining[srsc]
+                .counts()
+                .fold(AvailSet::none(), |mut uniques, (val, &count)| {
+                    if count == self.remaining[srsc.sector()][val] {
+                        uniques |= val;
+                    }
+                    uniques
+                });
         let deduced = self.eliminate_all(srsc.line_neighbors().flatten(), uniques)?;
         if !deduced.is_empty() {
             self.deduce(srsc.deduced_only_in_sec(deduced));

@@ -15,6 +15,7 @@ pub use coordinates::{Col, Coord, Intersect, OutOfRange, Row, Sector, SectorCol,
 
 use collections::indexed::{FixedSizeIndex, IndexMap};
 use solve::remaining::RemainingTracker;
+use trace::{NopTracer, Tracer};
 
 mod collections;
 #[macro_use]
@@ -135,31 +136,83 @@ impl Board {
     /// Attempts to solve this board, returning a board containing all solved values, if a
     /// solution is possible. Otherwise returns None.
     pub fn solve(&self) -> Option<Self> {
-        let mut stack = vec![(0, RemainingTracker::new(self))];
-        while let Some((depth, next)) = stack.pop() {
-            trace!("Trying board at depth {}", depth);
-            let mut tracer = trace::NopDeductiveTracer;
-            // Apply deductive rules to eliminate what we can and stop this stack-branch
-            // if the board is unsolveable.
-            if let Some(reduced) = solve::deductive::reduce(next, &mut tracer) {
-                if reduced.is_solved() {
-                    trace!("Board solved");
-                    return Some(reduced.into_board());
-                } else {
-                    trace!("Board reduced but not yet solved.");
-                    let len = stack.len();
-                    for choice in reduced.specify_one() {
-                        stack.push((depth + 1, choice));
-                    }
-                    trace!("Pushed {} boards at depth {}", stack.len() - len, depth + 1);
+        let (solution, _) = self.solve_traced::<NopTracer>();
+        solution
+    }
+
+    /// Attempts to solve this board, returning a board containing all solve
+    /// values, if a solution is possible, along with a tracer shoing the steps
+    /// needed to reach the solution.
+    pub fn solve_traced<T: Tracer>(&self) -> (Option<Self>, T) {
+        let mut stack =
+            match solve::deductive::reduce(RemainingTracker::new(self), T::deductive_tracer()) {
+                (Some(reduced), trace) if reduced.is_solved() => {
+                    trace!("Solved without guessing");
+                    return (Some(reduced.into_board()), T::solution(trace));
                 }
-            } else {
-                trace!("Board could not be reduced.");
+                (Some(reduced), trace) => {
+                    trace!("Guesses will be required to solve");
+                    vec![(T::guess(trace), reduced.specify_one())]
+                }
+                (None, trace) => {
+                    trace!("Initial board proved unsolvable");
+                    return (None, T::unsolveable(trace));
+                }
+            };
+
+        loop {
+            // Get the next possible guess from the top guess node on the stack.
+            match stack.last_mut().unwrap().1.next() {
+                Some(guess) => {
+                    match solve::deductive::reduce(guess, T::deductive_tracer()) {
+                        (Some(reduced), trace) if reduced.is_solved() => {
+                            trace!("Solved at depth {}", stack.len());
+                            let (mut parent, _) = stack.pop().unwrap();
+                            parent.add_child(T::solution(trace));
+                            // Get back to the root of the trace tree, adding
+                            // children along the way while discarding their iterators.
+                            while let Some((mut next, _)) = stack.pop() {
+                                next.add_child(parent);
+                                parent = next;
+                            }
+                            return (Some(reduced.into_board()), parent);
+                        }
+                        (Some(reduced), trace) => {
+                            trace!(
+                                "Board at depth {} reduced but needs more guesses",
+                                stack.len()
+                            );
+                            // Push a guess node for the next iteration to start visiting.
+                            stack.push((T::guess(trace), reduced.specify_one()));
+                        }
+                        (None, trace) => {
+                            trace!("Board at depth {} unsolveable", stack.len());
+                            // Add the child node but let next iteration handle
+                            // popping to parent if needed.
+                            stack.last_mut().unwrap().0.add_child(T::unsolveable(trace));
+                        }
+                    }
+                }
+                // There were no more guesses in the top node, so try to pop the
+                // node an add it to its parent. If there's no parent, we are done.
+                None => {
+                    trace!("No more boards at depth {}", stack.len());
+                    let (trace, _) = stack.pop().unwrap();
+                    let len = stack.len();
+                    match stack.last_mut() {
+                        Some((ref mut parent, _)) => {
+                            trace!("Returned to depth {}", len);
+                            parent.add_child(trace)
+                        }
+                        // No parent, nothing left in the stack to try. No solution.
+                        None => {
+                            trace!("Ran out of boards to try");
+                            return (None, trace);
+                        }
+                    }
+                }
             }
         }
-        trace!("Ran out of boards to try.");
-        // No solution found.
-        None
     }
 
     /// Return true if the board is known to be unsolveable.
