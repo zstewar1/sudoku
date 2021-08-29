@@ -281,11 +281,9 @@ pub enum UnsolveableReason {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[cfg(feature = "serde")]
     mod serde {
-        use super::*;
+        use super::super::*;
 
         use log::debug;
 

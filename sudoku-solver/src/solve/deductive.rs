@@ -477,9 +477,19 @@ impl SecRowSecCol for SectorCol {
 /// Reduce steps compare equal if they have the enum Variant and Zone, regardless of
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum ReduceStep {
+    /// The given sector changed so there is only one slot left that could hold
+    /// some value.
+    /// May be enqueued and processed more than once for each sector.
+    SecValsSingularized(Sector),
     /// The given coordinate changed to only have one value left.
     /// Will only be enqueued once for each cell.
     CoordSingularized(Coord),
+    /// The given sector-row changed so the number of values left is exactly 3.
+    /// Will only be enqueued once per sector-row.
+    SecRowTripleized(SectorRow),
+    /// The given sector-col changed so the number of values left is exactly 3.
+    /// Will only be enqueued once per sector-col.
+    SecColTripleized(SectorCol),
     /// The given row changed so there is only one slot left that could hold some
     /// value.
     /// May be enqueued and processed more than once for each row.
@@ -488,16 +498,6 @@ enum ReduceStep {
     /// value.
     /// May be enqueued and processed more than once for each col.
     ColValsSingularized(Col),
-    /// The given sector changed so there is only one slot left that could hold
-    /// some value.
-    /// May be enqueued and processed more than once for each sector.
-    SecValsSingularized(Sector),
-    /// The given sector-row changed so the number of values left is exactly 3.
-    /// Will only be enqueued once per sector-row.
-    SecRowTripleized(SectorRow),
-    /// The given sector-col changed so the number of values left is exactly 3.
-    /// Will only be enqueued once per sector-col.
-    SecColTripleized(SectorCol),
     /// The sector row changed so it is the only place left in its row that can
     /// hold one or more values, so those values can be eliminated from the rest
     /// of the sector.
