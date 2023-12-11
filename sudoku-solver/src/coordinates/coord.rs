@@ -70,6 +70,18 @@ impl Coord {
         SectorCol::containing(*self)
     }
 
+    /// Converts this coord to an index in row-major order.
+    #[inline]
+    pub fn rowmajor_idx(&self) -> usize {
+        self.idx()
+    }
+
+    /// Create a coord from an index in row major order. Panic if out of bounds.
+    #[inline]
+    pub fn from_rowmajor_idx(idx: usize) -> Self {
+        Self::from_idx(idx)
+    }
+
     /// Get all coordinates in the same row, column, and sector as this
     /// coordinate.
     pub fn neighbors(self) -> impl Iterator<Item = Coord> + DoubleEndedIterator + FusedIterator {

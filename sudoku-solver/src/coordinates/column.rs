@@ -34,7 +34,7 @@ impl Col {
 
     /// Unwrap the inner u8 value
     #[inline]
-    pub(crate) fn inner(self) -> u8 {
+    pub fn inner(self) -> u8 {
         self.0
     }
 
