@@ -17,6 +17,7 @@ pub trait Zone:
     + Clone
     + IntoIterator<Item = Coord>
 {
+    /// Size is the number of elements in a zone of this type.
     const SIZE: usize = Self::NUM_ITEMS;
 
     /// Get an iterator over all values of this zone.

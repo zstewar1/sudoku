@@ -22,6 +22,9 @@ use crate::{Col, Coord, Sector, SectorRow, Zone};
 pub struct Row(u8);
 
 impl Row {
+    /// Width of a row as a number of columns.
+    pub const WIDTH: u8 = 9;
+
     /// Construt a row with the given index. Panic if out of bounds.
     #[inline]
     pub fn new(val: u8) -> Self {
@@ -58,7 +61,7 @@ impl fmt::Display for Row {
 
 rowcol_fromint!(
     Row,
-    Row::SIZE,
+    Row::WIDTH,
     "row",
     u8,
     i8,
@@ -77,7 +80,7 @@ rowcol_fromint!(
 impl FixedSizeIndexable for Row {
     type Item = Coord;
 
-    const NUM_ITEMS: usize = 9;
+    const NUM_ITEMS: usize = Self::WIDTH as usize;
 
     #[inline]
     fn get_at_index(&self, idx: usize) -> Self::Item {

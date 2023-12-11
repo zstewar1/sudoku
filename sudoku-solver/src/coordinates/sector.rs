@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::collections::indexed::FixedSizeIndex;
 use crate::coordinates::{FixedSizeIndexable, ZoneContaining};
-use crate::{Col, Coord, Row, SectorCol, SectorRow, Zone};
+use crate::{Col, Coord, Row, SectorCol, SectorRow};
 
 /// Identifies a single 3x3 sector on the sudoku board.
 /// Sectors by row then by column (across each row, same as their index order and
@@ -29,18 +29,18 @@ pub struct Sector {
 
 impl Sector {
     /// Width of a sector in columns.
-    pub(crate) const WIDTH: u8 = 3;
+    pub const WIDTH: u8 = 3;
     /// Height of a sector in rows.
-    pub(crate) const HEIGHT: u8 = 3;
+    pub const HEIGHT: u8 = 3;
 
     /// Number of sectors across a row. (Number of sector columns).
-    pub(crate) const SECTORS_ACROSS: u8 = Row::SIZE as u8 / Self::WIDTH;
+    pub const SECTORS_ACROSS: u8 = Row::WIDTH / Self::WIDTH;
 
     /// Number of sectors down a column. (Number of sector rows).
-    pub(crate) const SECTORS_DOWN: u8 = Col::SIZE as u8 / Self::HEIGHT;
+    pub const SECTORS_DOWN: u8 = Col::HEIGHT / Self::HEIGHT;
 
     /// Total number of sectors.
-    pub(crate) const NUM_SECTORS: u8 = Self::SECTORS_ACROSS * Self::SECTORS_DOWN;
+    pub const NUM_SECTORS: u8 = Self::SECTORS_ACROSS * Self::SECTORS_DOWN;
 
     #[inline]
     pub(crate) fn base_row(&self) -> Row {
@@ -132,6 +132,8 @@ impl FixedSizeIndex for Sector {
 
 #[cfg(test)]
 mod tests {
+    use crate::Zone as _;
+
     use super::*;
 
     #[test]

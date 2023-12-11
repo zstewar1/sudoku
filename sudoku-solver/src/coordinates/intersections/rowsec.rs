@@ -51,13 +51,13 @@ impl SectorRow {
     /// Gets an iterator over the two SectorRows that share the same row as this one.
     #[inline]
     pub fn row_neighbors(self) -> array::IntoIter<Self, 2> {
-        array::IntoIter::new(super::array_filter_single_neq(self, self.row.sector_rows()))
+        super::array_filter_single_neq(self, self.row.sector_rows()).into_iter()
     }
 
     /// Gets an iterator over the two SectorRows that share the same sector as this one.
     #[inline]
     pub fn sector_neighbors(self) -> array::IntoIter<Self, 2> {
-        array::IntoIter::new(super::array_filter_single_neq(self, self.sector().rows()))
+        super::array_filter_single_neq(self, self.sector().rows()).into_iter()
     }
 
     /// Iterator over all SectorRows in the rest of the sector and row.

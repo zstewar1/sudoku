@@ -22,6 +22,9 @@ use crate::{Coord, Row, Sector, SectorCol, Zone};
 pub struct Col(u8);
 
 impl Col {
+    /// Height of a column in terms of number of rows.
+    pub const HEIGHT: u8 = 9;
+
     /// Construt a column with the given index. Panic if out of bounds.
     #[inline]
     pub fn new(val: u8) -> Self {
@@ -41,13 +44,13 @@ impl Col {
     ) -> impl Iterator<Item = SectorCol> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
     {
         (0..Sector::SECTORS_DOWN).map(move |r| {
-            SectorCol::containing_zone(Coord::new(Row::new(r * Sector::HEIGHT), self))
+            SectorCol::containing_zone(Coord::new(Row::new(r * Sector::HEIGHT as u8), self))
         })
     }
 
     /// Base-col for sectors that contain this col.
     pub(crate) fn sector_base(self) -> Self {
-        Col(self.0 - self.0 % Sector::WIDTH)
+        Col(self.0 - self.0 % Sector::WIDTH as u8)
     }
 }
 
@@ -59,7 +62,7 @@ impl fmt::Display for Col {
 
 rowcol_fromint!(
     Col,
-    Col::SIZE,
+    Col::HEIGHT,
     "col",
     u8,
     i8,
@@ -78,7 +81,7 @@ rowcol_fromint!(
 impl FixedSizeIndexable for Col {
     type Item = Coord;
 
-    const NUM_ITEMS: usize = 9;
+    const NUM_ITEMS: usize = Self::HEIGHT as usize;
 
     #[inline]
     fn get_at_index(&self, idx: usize) -> Self::Item {

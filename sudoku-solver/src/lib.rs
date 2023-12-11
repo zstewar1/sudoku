@@ -128,6 +128,12 @@ impl Board {
     /// Total size of the board.
     pub const SIZE: usize = IndexMap::<Coord, Option<Val>>::LEN;
 
+    /// Width of the board in columns.
+    pub const WIDTH: u8 = Row::WIDTH;
+
+    /// Height of the board in rows.
+    pub const HEIGHT: u8 = Col::HEIGHT;
+
     /// Create a new board with no positions specified.
     pub fn new() -> Self {
         Default::default()
