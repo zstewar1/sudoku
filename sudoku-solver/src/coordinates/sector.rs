@@ -42,13 +42,15 @@ impl Sector {
     /// Total number of sectors.
     pub const NUM_SECTORS: u8 = Self::SECTORS_ACROSS * Self::SECTORS_DOWN;
 
+    /// The row where the sector starts.
     #[inline]
-    pub(crate) fn base_row(&self) -> Row {
+    pub fn base_row(&self) -> Row {
         self.base_row
     }
 
+    /// The column where the sector starts.
     #[inline]
-    pub(crate) fn base_col(&self) -> Col {
+    pub fn base_col(&self) -> Col {
         self.base_col
     }
 
