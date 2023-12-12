@@ -74,6 +74,11 @@ impl AvailSet {
         self.0 & Self::to_mask(val) != 0
     }
 
+    /// Return true if these two AvailSets overlap for at least one value.
+    pub fn intersects(&self, other: Self) -> bool {
+        !(*self & other).is_empty()
+    }
+
     /// Counts the number of values in this set.
     #[inline]
     pub fn len(&self) -> usize {
